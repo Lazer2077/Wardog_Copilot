@@ -23,6 +23,8 @@ class CollectionMapPicker:
         self.pin = tk.BooleanVar(value=not collector.cfg.auto_map.enabled)
         self.follow = tk.BooleanVar(value=True)
         tk.Label(self.win,text='战术地图',font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w',padx=10,pady=(10,0))
+        self.team_hint = tk.Label(self.win,text='队伍：识别中',anchor='w')
+        self.team_hint.pack(fill='x',padx=10)
         bar = tk.Frame(self.win)
         bar.pack(fill='x',padx=10,pady=8)
         self.combo = ttk.Combobox(bar,state='readonly',textvariable=self.choice,
@@ -157,6 +159,11 @@ class CollectionMapPicker:
         if not self.win.winfo_exists():
             return
         nav = self.c.latest_nav or {}
+        from .team_detection import TEAM_NAMES
+        team = nav.get('team') or {}
+        faction = team.get('faction_id') if (nav.get('context_id') == self.c.context_id
+            and 0 <= self.c.now()-nav.get('t',-100) <= 1.) else None
+        self.team_hint.config(text=f'队伍：{TEAM_NAMES.get(faction, "识别中")}')
         fresh = (nav.get('context_id') == self.c.context_id and 0 <= self.c.now()-nav.get('t',-100) <= 1.)
         follow_map = nav.get('map_id') if fresh else None
         if not self.c.cfg.auto_map.enabled:

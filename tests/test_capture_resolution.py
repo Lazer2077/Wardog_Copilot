@@ -42,8 +42,9 @@ def test_resolution_mapping_rejects_ambiguous_displays_and_aspect_changes():
     assert not region_on_screen(Region(-10, 0, 100, 100), [HD])
 
 
-def test_sensor_reports_bad_region_and_recovers_after_recalibration():
+def test_sensor_reports_bad_region_and_recovers_after_recalibration(monkeypatch):
     from wardog_ad.autopilot import ScreenSensors
+    monkeypatch.setattr('wardog_ad.input_win.foreground_is', lambda _: True)
     cfg = Config(minimap=Region(65, 1510, 510, 460))
     s = ScreenSensors(cfg)
     cap = ScreenCapture.__new__(ScreenCapture)

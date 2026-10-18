@@ -240,6 +240,9 @@ class NavigationObserver:
                    state=None, speed=None, destination=None, route_id=None,
                    reference_route=None, local_plan=None,
                    rule_control=dict(t=now, valid=False, reason='missing_state_or_route', applied=False, axes=None))
+        from .team_detection import TeamDetector
+        if not hasattr(self,'team_detector'):
+            self.team_detector = TeamDetector()
         if self.config_path and now - self.last_config > 2:
             saved = Config.load(self.config_path)
             self.cfg.destinations = saved.destinations
@@ -259,6 +262,7 @@ class NavigationObserver:
             self.map_id = out['map_id']
             self.estimator = StateEstimator(self.assets.meters_per_pixel)
             self.path = self.route_key = None
+        out['team'] = _plain(self.team_detector.update(roi,now,(self.assets.map_id,view)))
         if fix is not None and fix.valid and self.cfg.refine_fixes and hasattr(self.assets, 'load_image'):
             from .refine import FixRefiner
             if getattr(self, '_refine_map', None) != self.assets.map_id:

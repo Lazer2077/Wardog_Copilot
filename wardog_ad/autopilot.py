@@ -1027,6 +1027,10 @@ class ScreenSensors:
         self._tap = None
         self._hud = None
         self.capture_errors = {}
+        from .team_detection import TeamDetector
+        self._team_detector = TeamDetector()
+        self.team_reading = self._team_detector.reading
+        self._team_lock = threading.Lock()
 
     def _cap(self):
         # mss handles are per-thread on Windows
@@ -1048,7 +1052,15 @@ class ScreenSensors:
         return image
 
     def minimap(self):
-        return self._grab(self.cfg.localization_region, 'minimap')
+        from .input_win import foreground_is
+        if self.cfg.require_foreground and not foreground_is(self.cfg.window_title):
+            image = None  # Never classify another foreground app as game terrain/team.
+        else:
+            image = self._grab(self.cfg.localization_region, 'minimap')
+        with self._team_lock:
+            self.team_reading = self._team_detector.update(image, time.monotonic(),
+                (self.cfg.map_id,self.cfg.profile))
+        return image
 
     def main_view(self):
         return self._grab(self.cfg.main_view, 'main_view') if self.cfg.main_view.valid else None

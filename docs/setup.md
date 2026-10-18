@@ -21,6 +21,21 @@ The UI selects the minimap, optional central motion area and helicopter warning
 region. `--anchor-only` selects your own position marker, not another vehicle or
 the arrow's tip. 标定自己的车辆中心，不是友军、导航点或箭头尖端。
 
+The map panel defaults to automatic faction selection from several small coloured
+friendly markers in the minimap, confirmed across multiple frames. Large zone
+tints, score bars and the CONTROL line are excluded. This is a heuristic for the
+default faction colours; custom colours, missing markers or conflicting markers
+can leave it unconfirmed. Manual selection remains available. Selecting a faction
+does **not** establish your position at that faction's HQ; only use “我在这个基地”
+when you are actually there. Both recorder navigation metadata and flight logs
+include the inferred faction, confidence and observation time.
+
+地图面板默认自动识别队伍并同步基地选项，以多个小型友军标记的颜色及连续多帧一致性判断。
+不把大面积区域着色、比分条或“控制”占领方当作所属队伍。该启发式方法适用于默认阵营颜色；
+自定义颜色、标记不足或冲突时可能无法确认，仍可手动修正。
+**识别队伍不代表已经定位到基地**；只有确实在基地内，才使用“我在这个基地”提供初始位置。
+采集器导航数据与飞行日志会记录队伍、置信度和观测时间。
+
 ## HUD and compass / 仪表与罗盘
 
 Edit the generated local `config.json` using **absolute physical screen pixels**:

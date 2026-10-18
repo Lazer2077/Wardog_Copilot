@@ -7,6 +7,7 @@ over borderless/windowed games; in exclusive fullscreen use the hotkeys.
 from __future__ import annotations
 
 import sys
+import time
 import tkinter as tk
 from .ui_theme import (SURFACE, TEXT, MUTED, ACCENT, GREEN, PURPLE, AMBER, OpacityControl,
                        window_theme, style_widgets, dark_titlebar, save_opacity, ScrollPanel)
@@ -131,6 +132,10 @@ class ControlPanel:
         lines = []
         if not self.flares_only:
             lines.append(f'地图: {p.assets.name}' + (f'  {tel.map_status}' if tel.map_status else ''))
+            from .team_detection import TEAM_NAMES
+            reading = getattr(p.sensors,'team_reading',None)
+            faction = reading.faction_id if reading is not None and time.monotonic()-reading.timestamp <= 3 else None
+            lines.append(f'队伍: {TEAM_NAMES.get(faction, "识别中")}')
             errors = getattr(p.sensors, 'capture_errors', {})
             if errors:
                 lines.append('截屏区域无效：请按当前分辨率重新标定小地图 / HUD / 罗盘')

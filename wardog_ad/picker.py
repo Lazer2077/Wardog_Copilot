@@ -112,9 +112,15 @@ class MapPicker:
         self.base_combo = ttk.Combobox(bases, state='readonly', textvariable=self.base_choice, width=26)
         self.base_combo.pack(fill='x')
         self.base_combo.bind('<<ComboboxSelected>>', self._base_preview)
+        self.base_auto = tk.BooleanVar(value=True)
+        tk.Checkbutton(bases, text='从小地图自动识别队伍', variable=self.base_auto,
+                       command=self._sync_team).pack(anchor='w')
+        self.team_hint = tk.Label(bases, text='队伍：识别中', anchor='w')
+        self.team_hint.pack(fill='x')
         row = tk.Frame(bases)
         row.pack(fill='x', pady=2)
-        tk.Button(row, text='我在这个基地', font=font, command=self._use_base).pack(side='left')
+        self.use_base_button = tk.Button(row, text='我在这个基地', font=font, command=self._use_base)
+        self.use_base_button.pack(side='left')
         tk.Button(row, text='点选当前位置', font=font,
                   command=lambda: self._start_position_pick('initial')).pack(side='left', padx=3)
         row = tk.Frame(bases)
@@ -341,6 +347,7 @@ class MapPicker:
             self._auto_center_pending = True
         if self._auto_center_pending and self._vehicle_position() is not None:
             self.center_on_vehicle(zoom=2.)
+        self._sync_team()
         if self.view_dirty:
             self._render_map()
         self._draw_overlay()
@@ -452,10 +459,25 @@ class MapPicker:
         self._team_bases = team_bases(self.assets, self.pilot.cfg)
         self._base_choices = {b.name + ('（已修正）' if b.custom else ''): b for b in self._team_bases}
         self.base_combo.configure(values=list(self._base_choices))
-        self.base_choice.set(next(iter(self._base_choices), ''))
+        self.base_choice.set('')
+        self._sync_team()
         self._cancel_position_pick()
 
+    def _sync_team(self):
+        from .team_detection import TEAM_NAMES
+        if self.base_auto.get():
+            reading = getattr(getattr(self.pilot,'sensors',None),'team_reading',None)
+            faction = reading.faction_id if reading and time.monotonic()-reading.timestamp <= 3 else None
+            label = next((label for label,base in self._base_choices.items() if base.id == faction),'')
+            self.base_choice.set(label)
+            self.team_hint.config(text=f'队伍：{TEAM_NAMES[faction]}（小地图识别）' if label else '队伍：等待稳定友军标记，可手动选择')
+        else:
+            self.team_hint.config(text='队伍：手动选择')
+        self.use_base_button.config(state='normal' if self.base_choice.get() in self._base_choices else 'disabled')
+
     def _base_preview(self, event=None):
+        self.base_auto.set(False)
+        self._sync_team()
         base = self._base_choices.get(self.base_choice.get())
         if base is not None:
             self.cx, self.cy = base.point
