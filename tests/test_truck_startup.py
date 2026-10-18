@@ -41,6 +41,22 @@ def test_stationary_truck_can_start_from_compass_without_motion_heading():
     assert 'W' in p.keyboard.down
 
 
+def test_reverse_limit_releases_keys_and_pause_does_not_reset_budget():
+    from wardog_ad.controllers import Output
+    p=pilot()
+    p.go();p.tick(1.);p.actuate(1.)
+    p.truck_recovery.origin=(0.,0.)
+    p.truck_recovery.attempts=2
+    p.controller.step=lambda *a,**kw:Output(dict(steer=0.,throttle=0.),'blocked',
+        dict(recovery_reason='reverse_limit'),takeover=True)
+    tel=p.tick(1.2)
+    assert not p.engaged and not p.keyboard.down and tel.status=='blocked'
+    assert tel.output.takeover and p.truck_recovery.attempts==2
+    p.go();p.tick(2.)
+    assert p.controller.recovery is p.truck_recovery
+    assert p.truck_recovery.attempts==2
+
+
 def test_pause_previews_route_but_does_not_advance_recovery_or_send_keys():
     p = pilot()
     p.go()

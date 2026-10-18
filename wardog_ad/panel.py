@@ -13,6 +13,7 @@ from .ui_theme import (SURFACE, TEXT, MUTED, ACCENT, GREEN, PURPLE, AMBER, Opaci
                        window_theme, style_widgets, dark_titlebar, save_opacity, ScrollPanel)
 
 STATUS_CN = {'map search': '识别地图中', 'standby': '待机', 'searching': '定位中', 'lost': '定位丢失', 'no goal': '无目标', 'drive': '行驶',
+             'recovery wait': '起步宽限 / 脱困冷却',
              'paused': '已暂停',
              'fly': '飞行', 'arrived': '已到达', 'kturn': '掉头', 'reverse': '倒车脱困', 'bypass': '绕行',
              'blocked': '道路受阻', 'replan': '重新规划', 'route error': '规划失败', 'takeoff': '起飞爬升',
@@ -132,10 +133,17 @@ class ControlPanel:
         lines = []
         if not self.flares_only:
             lines.append(f'地图: {p.assets.name}' + (f'  {tel.map_status}' if tel.map_status else ''))
+            if p.map_manager is not None and not p.map_manager.ready:
+                lines.append('地图尚未确认：上方名称是上次使用的地图')
             from .team_detection import TEAM_NAMES
             reading = getattr(p.sensors,'team_reading',None)
             faction = reading.faction_id if reading is not None and time.monotonic()-reading.timestamp <= 3 else None
             lines.append(f'队伍: {TEAM_NAMES.get(faction, "识别中")}')
+            if p.cfg.profile == 'truck':
+                guard = getattr(p,'truck_recovery',None)
+                lines.append(f'脱困倒车: {guard.attempts if guard else 0}/{p.cfg.truck.max_reverse_attempts} 次')
+                if not p.cfg.main_view.valid:
+                    lines.append('前方画面未标定：已禁用被困自动倒车')
             errors = getattr(p.sensors, 'capture_errors', {})
             if errors:
                 lines.append('截屏区域无效：请按当前分辨率重新标定小地图 / HUD / 罗盘')

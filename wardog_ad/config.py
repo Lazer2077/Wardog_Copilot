@@ -80,6 +80,12 @@ class TruckTuning:
     off_route_s: float = 3.0
     stuck_s: float = 2.5
     stuck_move_m: float = 5.0          # less displacement than this in stuck_s => stuck
+    startup_grace_s: float = 6.0       # no automatic reverse immediately after starting/replanning
+    recovery_cooldown_s: float = 8.0   # measured after the recovery manoeuvre ends
+    max_reverse_attempts: int = 2      # reverse + K-turn starts per recovery area
+    recovery_reset_m: float = 30.0     # leave this area before another attempt budget is granted
+    stuck_max_speed_ms: float = .75
+    stuck_motion_threshold: float = .15
     reverse_s: float = 1.6
     bypass_s: float = 1.5
     stuck_attempts: int = 3             # failures at one spot before re-routing around it

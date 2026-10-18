@@ -416,6 +416,8 @@ def run_sim(cfg: Config, assets, start, goal, *, heading: float | None = None, w
                     arrived = True
             trace.append((world.time, world.body.x, world.body.y, world.body.heading, world.body.speed, tel.status,
                           None if tel.output is None else dict(tel.output.axes, **tel.output.info)))
+            if tel.output is not None and tel.output.takeover:
+                break
             if viewer is not None and viewer.show(tel):
                 break
             pending = any(not ev.resolved for ev in world.locks)

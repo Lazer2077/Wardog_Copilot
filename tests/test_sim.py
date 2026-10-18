@@ -47,7 +47,7 @@ def test_truck_follows_road(world):
     assert np.percentile(cross, 90) < 12 and max(cross) < 20
 
 
-def test_truck_turns_around_and_reroutes_around_block(world):
+def test_truck_turns_around_and_hands_over_after_bounded_recovery(world):
     from wardog_ad.planner import Path
     from wardog_ad.sim import run_sim
     assets, graph, start, goal, route = world
@@ -57,8 +57,14 @@ def test_truck_turns_around_and_reroutes_around_block(world):
     wx, wy = Path(route).at(300 / assets.meters_per_pixel)
     res = run_sim(Config(), assets, start, goal, heading=bearing(route[0], route[5]), graph=graph,
                   max_time=400, walls=[(wx - 1.5, wy - 1.5, wx + 1.5, wy + 1.5)])
-    modes = {row[5] for row in res.trace}
-    assert res.arrived and {'reverse', 'replan'} <= modes
+    # The default policy now hands over after two attempts instead of continuing
+    # to reverse until a third failure permits a speculative detour.
+    starts = [row for i,row in enumerate(res.trace) if row[5]=='reverse'
+              and (i==0 or res.trace[i-1][5]!='reverse')]
+    assert not res.arrived and len(starts)==2
+    assert res.trace[-1][5]=='blocked' and res.trace[-1][6]['throttle']==0
+    assert res.trace[-1][6]['recovery_reason']=='reverse_limit'
+    assert res.time < 400
 
 
 def test_aircraft_waypoints_and_flares(world):

@@ -24,10 +24,23 @@ class Output:
     info: dict = field(default_factory=dict)
     done: bool = False
     replan: bool = False
+    takeover: bool = False
+
+
+@dataclass
+class TruckRecoveryState:
+    """Shared across route replans and pauses; losing localization grants no new attempts."""
+    origin: tuple | None = None
+    attempts: int = 0
+    cooldown_until: float = 0.
+
+    def observe(self, point, mpp, reset_m):
+        if self.origin is not None and distance(point, self.origin)*mpp > reset_m:
+            self.origin,self.attempts,self.cooldown_until = None,0,0.
 
 
 class TruckDriver:
-    def __init__(self, path: Path, tuning, meters_per_pixel: float):
+    def __init__(self, path: Path, tuning, meters_per_pixel: float, *, recovery=None):
         self.path = path
         self.t = tuning
         self.mpp = meters_per_pixel
@@ -42,6 +55,8 @@ class TruckDriver:
         self.stuck_points: list = []
         self.off_since: float | None = None
         self.last_time: float | None = None
+        self.started_at: float | None = None
+        self.recovery = recovery if recovery is not None else TruckRecoveryState()
 
     def set_path(self, path: Path):
         self.path, self.progress, self.integral, self.mode = path, 0.0, 0.0, 'drive'
@@ -50,6 +65,23 @@ class TruckDriver:
         self.history.clear()
         self.stuck_points.clear()
         self.mode_until = self.mode_steer = 0.0
+        self.started_at = None
+
+    def _begin_reverse(self, st, now, mode, steer, info):
+        t,r = self.t,self.recovery
+        if r.attempts >= max(0,t.max_reverse_attempts):
+            self.mode = 'blocked'
+            info.update(recovery_reason='reverse_limit',reverse_attempts=r.attempts)
+            return Output({'steer':0.,'throttle':0.},'blocked',info,takeover=True)
+        r.origin = st.position if r.origin is None else r.origin
+        r.attempts += 1
+        duration = t.reverse_s + (t.bypass_s if mode == 'reverse' else 0.)
+        r.cooldown_until = now + duration + t.recovery_cooldown_s
+        self.mode,self.mode_until,self.mode_steer = mode,now+t.reverse_s,steer
+        self.history.clear()
+        self.slow_since = None
+        info.update(recovery_reason='stuck' if mode == 'reverse' else 'target_behind',reverse_attempts=r.attempts)
+        return Output({'steer':steer,'throttle':-1.},mode,info)
 
     def _px(self, meters: float) -> float:
         return meters / self.mpp
@@ -59,6 +91,9 @@ class TruckDriver:
         self.last_time = now
         path, t = self.path, self.t
         speed = st.speed_ms
+        if self.started_at is None:
+            self.started_at = now
+        self.recovery.observe(st.position,self.mpp,t.recovery_reset_m)
 
         # progress along the path: search a window around the previous progress so
         # loops and parallel roads cannot make it jump.
@@ -67,7 +102,11 @@ class TruckDriver:
         cross_m = gap * self.mpp
         remaining_m = (path.length - self.progress) * self.mpp
         goal_m = distance(st.position, path.points[-1]) * self.mpp
-        info = dict(progress_m=self.progress * self.mpp, remaining_m=remaining_m, cross_m=cross_m, speed=speed)
+        info = dict(progress_m=self.progress * self.mpp, remaining_m=remaining_m, cross_m=cross_m, speed=speed,
+                    reverse_attempts=self.recovery.attempts, motion_level=motion_level)
+        if self.mode == 'blocked':
+            info['recovery_reason'] = 'reverse_limit'
+            return Output({'steer':0.,'throttle':0.},'blocked',info,takeover=True)
 
         if self.mode == 'arrived' or (remaining_m < t.arrive_radius_m and goal_m < t.arrive_radius_m * 1.5):
             self.mode = 'arrived'
@@ -91,10 +130,12 @@ class TruckDriver:
             return Output({'steer': self.mode_steer, 'throttle': -1.0}, self.mode, info)
         if self.mode == 'reverse':
             self.mode, self.mode_until = 'bypass', now + t.bypass_s
+            self.recovery.cooldown_until = now + t.bypass_s + t.recovery_cooldown_s
             self.mode_steer = -self.mode_steer
         if self.mode == 'bypass' and now < self.mode_until:
             return Output({'steer': self.mode_steer, 'throttle': 0.7}, 'bypass', info)
         if self.mode in ('bypass', 'kturn'):
+            self.recovery.cooldown_until = max(self.recovery.cooldown_until,now+t.recovery_cooldown_s)
             self.mode = 'drive'
             self.slow_since = None
             self.history.clear()
@@ -108,9 +149,10 @@ class TruckDriver:
 
         # target behind: K-turn (reverse with opposite lock swings the nose round)
         if abs(alpha) > 110 and abs(speed) < 3.0:
-            self.mode, self.mode_until = 'kturn', now + t.reverse_s
-            self.mode_steer = -math.copysign(1.0, alpha)
-            return Output({'steer': self.mode_steer, 'throttle': -1.0}, 'kturn', info)
+            if now-self.started_at < t.startup_grace_s or now < self.recovery.cooldown_until:
+                info['recovery_reason'] = 'startup_grace' if now-self.started_at < t.startup_grace_s else 'cooldown'
+                return Output({'steer':0.,'throttle':0.},'recovery wait',info)
+            return self._begin_reverse(st,now,'kturn',-math.copysign(1.,alpha),info)
 
         kappa = 2.0 * math.sin(math.radians(alpha)) / dist_m
         # Feed-forward from pure pursuit plus a yaw-rate loop: the key-PWM -> wheel angle
@@ -156,11 +198,24 @@ class TruckDriver:
             self.history.popleft()
         span = now - self.history[0][0]
         moved_m = distance(self.history[0][1:], (st.x, st.y)) * self.mpp
-        frozen = motion_level is None or motion_level < 0.15
-        if throttle > 0.4 and frozen and moved_m < t.stuck_move_m:
+        samples = np.asarray(self.history,dtype=float)
+        times = samples[:,0]-samples[:,0].mean()
+        variance = float(times @ times)
+        window_speed = (float(np.linalg.norm(times @ samples[:,1:] / variance))*self.mpp
+                        if variance > 1e-6 else math.inf)
+        frozen = motion_level is not None and math.isfinite(motion_level) and 0 <= motion_level < t.stuck_motion_threshold
+        grace = now-self.started_at < t.startup_grace_s
+        cooling = now < self.recovery.cooldown_until
+        info.update(stuck_span_s=span,stuck_moved_m=moved_m,stuck_window_speed_ms=window_speed,
+                    recovery_reason='startup_grace' if grace else 'cooldown' if cooling
+                    else 'no_visual_motion' if motion_level is None else 'monitoring')
+        if (not grace and not cooling and throttle > 0.4 and frozen
+                and window_speed <= t.stuck_max_speed_ms and moved_m < t.stuck_move_m):
             if self.slow_since is None:
                 self.slow_since = now
             if now - self.slow_since >= t.stuck_s and span >= t.stuck_s * .8:
+                if self.recovery.attempts >= max(0,t.max_reverse_attempts):
+                    return self._begin_reverse(st,now,'reverse',0.,info)
                 here = (st.x, st.y)
                 self.stuck_points.append(here)
                 nearby = [p for p in self.stuck_points if distance(p, here) * self.mpp < 30]
@@ -174,9 +229,8 @@ class TruckDriver:
                     ahead = heading_vector(st.heading) * t.blocked_radius_m * .9 / self.mpp
                     info['blocked_at'] = (st.x + ahead[0], st.y + ahead[1])
                     return Output({'steer': 0.0, 'throttle': 0.0}, 'blocked', info, replan=True)
-                self.mode, self.mode_until = 'reverse', now + t.reverse_s
-                self.mode_steer = -steer if abs(steer) > .2 else (1.0 if alpha < 0 else -1.0)
-                return Output({'steer': self.mode_steer, 'throttle': -1.0}, 'reverse', info)
+                turn = -steer if abs(steer) > .2 else (1.0 if alpha < 0 else -1.0)
+                return self._begin_reverse(st,now,'reverse',turn,info)
         else:
             self.slow_since = None
 

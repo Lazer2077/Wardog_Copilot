@@ -71,6 +71,37 @@ def test_ambiguous_and_weak_matches_are_rejected():
     assert not m.update(IMAGE, 1).ready
 
 
+def test_candidate_diagnostics_explain_rejected_or_ambiguous_identity():
+    m,la,lb=manager()
+    lb.fix=good()
+    result=m.update(IMAGE,0)
+    assert not result.ready
+    assert set(m.diagnostics)=={'a','b'}
+    assert m.diagnostics['a']['score']==m.diagnostics['b']['score']>0
+    assert m.diagnostics['a']['inliers']==30
+    m.update(None,1)
+    assert not m.diagnostics
+
+
+def test_aircraft_verifies_other_maps_even_when_current_tracker_is_good():
+    from wardog_ad.autopilot import Autopilot
+    from wardog_ad.input_win import FakeKeyboard
+    m,la,lb=manager()
+    cfg=Config(profile='aircraft',map_id='a')
+    cfg.aircraft.lock_source='none'
+    p=Autopilot(cfg,m.assets['a'],FakeKeyboard(),SimpleNamespace(),locator=la,graph=object())
+    p.map_manager=m
+    p._last_minimap=IMAGE
+    for now in range(3):
+        p.last_hud=now
+        p._air_map_watch(good(),float(now))
+    assert m.ready and p.telemetry.map_status=='map confirmed: a'
+    lb.fix=good()
+    p.last_hud=3
+    p._air_map_watch(good(),3.)
+    assert not m.ready and p.telemetry.map_status=='unknown or ambiguous map'
+
+
 def test_candidate_position_or_scale_jump_restarts_confirmation():
     m, la, _ = manager()
     m.update(IMAGE, 0)

@@ -31,6 +31,8 @@ class MapManager:
         self.reason = 'identifying map'
         self.candidates = candidates
         self.loaded = False
+        self.diagnostics = {}
+        self.diagnostics_at = None
 
     def _load(self):
         if self.loaded:
@@ -67,6 +69,8 @@ class MapManager:
     def update(self, image, now, anchor=(.5, .5), north_up=True):
         self._load()
         if image is None:
+            self.diagnostics = {}
+            self.diagnostics_at = now
             self._reset('no minimap; map unconfirmed')
             return MapSelection(None, Fix(reason=self.reason), False, self.reason)
 
@@ -79,12 +83,17 @@ class MapManager:
         self.next_scan = now + max(.1, self.t.scan_interval_s)
 
         ranked = []
+        self.diagnostics_at = now
         for name, locator in self.locators.items():
             # Full-map verification prevents an old local tracker from biasing identity.
             locator.reset()
             candidate = locator.locate(image, anchor, north_up)
+            score = (candidate.confidence * math.sqrt(max(0,candidate.inliers)) / (1+candidate.error)
+                     if self._quality(candidate) else 0.)
+            self.diagnostics[name] = dict(valid=candidate.valid, confidence=candidate.confidence,
+                inliers=candidate.inliers, error=candidate.error, scale=candidate.scale,
+                rotation=candidate.rotation, score=score, reason=candidate.reason)
             if self._quality(candidate):
-                score = candidate.confidence * math.sqrt(candidate.inliers) / (1 + candidate.error)
                 ranked.append((score, name, candidate))
         ranked.sort(key=lambda item: item[0], reverse=True)
         if not ranked or (len(ranked) > 1 and ranked[0][0] < ranked[1][0] * self.t.score_ratio):

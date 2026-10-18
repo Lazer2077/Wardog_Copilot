@@ -18,7 +18,7 @@ import numpy as np
 from .actuator import Axis, PWMActuator
 from .airnav import AirNavigator
 from .config import Config
-from .controllers import AircraftPilot, HeliPilot, Output, TruckDriver
+from .controllers import AircraftPilot, HeliPilot, Output, TruckDriver, TruckRecoveryState
 from .estimator import StateEstimator, VehicleState
 from .localization import Fix, MinimapLocalizer
 from .perception import FlareController, MissileLockDetector, MotionMonitor
@@ -128,6 +128,7 @@ class Autopilot:
         self.last_fast = -1e9           # last fast-loop pitch update    # (t, pitch, pitch_target, cyclic) since the last log line
         self._apply_profile()
         self.map_manager = None        # enabled by run_live, truck only
+        self.truck_recovery = TruckRecoveryState()
 
     def _switch_map(self, assets, locator):
         """Discard all old-map coordinates before allowing another mission."""
@@ -135,6 +136,7 @@ class Autopilot:
             self.disengage(f'map changed to {assets.name}; press GO to start a new mission')
             graph = RoadGraph(assets.roads)
             self.assets, self.locator = assets, locator
+            self.truck_recovery = TruckRecoveryState()
             self.cfg.map_id = assets.map_id
             self.mpp = assets.meters_per_pixel
             self.graph = graph
@@ -426,7 +428,7 @@ class Autopilot:
             if isinstance(self.controller, TruckDriver):
                 self.controller.set_path(path)
             else:
-                self.controller = TruckDriver(path, t, self.mpp)
+                self.controller = TruckDriver(path, t, self.mpp, recovery=self.truck_recovery)
         self.telemetry.route = [tuple(p) for p in points]
         log.info('route planned: %d points', len(points))
 
@@ -632,12 +634,17 @@ class Autopilot:
             return
         good = fix is not None and fix.valid and fix.confidence >= mm.t.min_confidence
         in_game = now - self.last_hud < 2.0
-        if good or not in_game:
+        if not in_game:
             self._air_fail_since = None
             return
-        self._air_fail_since = getattr(self, '_air_fail_since', None) or now
-        if now - self._air_fail_since < self.cfg.auto_map.air_fail_s:
-            return
+        if good:
+            self._air_fail_since = None
+            if mm.ready and now < mm.next_scan:
+                return
+        else:
+            self._air_fail_since = getattr(self, '_air_fail_since', None) or now
+            if now - self._air_fail_since < self.cfg.auto_map.air_fail_s:
+                return
         image = getattr(self, '_last_minimap', None)
         if image is None:
             return
@@ -906,6 +913,10 @@ class Autopilot:
                     return tel
             out = self.controller.step(state, now, None if motion is None else self.motion.level, hud=hud)
             tel.output = out
+            if out.takeover:
+                self.disengage('automatic reverse limit reached; manual intervention required')
+                tel.output,tel.status,tel.engaged = out,out.mode,False
+                return tel
             info = out.info
             tel.remaining_m = info.get('remaining_m', info.get('distance_m'))
             if out.replan:

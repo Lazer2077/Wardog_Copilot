@@ -36,6 +36,29 @@ include the inferred faction, confidence and observation time.
 **识别队伍不代表已经定位到基地**；只有确实在基地内，才使用“我在这个基地”提供初始位置。
 采集器导航数据与飞行日志会记录队伍、置信度和观测时间。
 
+## Truck recovery / 卡车脱困
+
+Automatic stuck recovery requires a calibrated main-view crop, finite low visual
+motion, sustained throttle, window-estimated speed no higher than 0.75 m/s and insufficient movement.
+Missing visual input disables stuck-triggered reversing. Defaults: 6 s startup
+grace, 8 s cooldown after each manoeuvre, and at most 2 reverse/K-turn attempts
+within a 30 m area. The vehicle stops and requests manual control at the limit.
+Pause, localization loss and replanning preserve the attempt budget; driving more
+than 30 m away restores it. These settings are under `truck` in the local config:
+`startup_grace_s`, `recovery_cooldown_s`, `max_reverse_attempts`, `recovery_reset_m`.
+
+卡车倒车脱困需要已标定的前方画面、有效的低视觉运动、持续给油、时间窗口内拟合车速不超过 0.75 m/s，
+以及位移不足同时成立；没有视觉输入时不会因“被困”自动倒车。
+默认起步宽限 6 秒，每次机动结束后冷却 8 秒，同一区域最多倒车 / K-turn 2 次，
+达到上限后停车交还人工。暂停、定位丢失和重规划不会刷新次数，驶离原脱困区域 30 米后恢复。
+对应配置为 `truck.startup_grace_s`、`recovery_cooldown_s`、
+`max_reverse_attempts`、`recovery_reset_m`。
+
+Flight logs now include per-map candidate confidence, inliers, residual and score
+under `map_candidates`. A local match or an old `map_id` label alone is not proof
+of the current map's identity. 飞行日志的 `map_candidates` 记录各地图候选的置信度、
+内点数、误差及得分，用于核对错图与歧义；旧的地图名称标签本身不能作为识别成功的证据。
+
 ## HUD and compass / 仪表与罗盘
 
 Edit the generated local `config.json` using **absolute physical screen pixels**:

@@ -33,6 +33,9 @@ class FlightRecorder:
         record = {
             't': round(now, 3), 'tick_ms': round(tick_s * 1000), 'profile': pilot.cfg.profile,
             'map_id': pilot.cfg.map_id, 'map_status': tel.map_status,
+            'map_candidates': getattr(pilot.map_manager, 'diagnostics', {}),
+            'map_candidates_t': getattr(pilot.map_manager, 'diagnostics_at', None),
+            'map_confirmed': getattr(pilot.map_manager, 'ready', None),
             'team': getattr(pilot.sensors, 'team_reading', None),
             'camera_view': pilot.cfg.truck.camera_view if pilot.cfg.profile == 'truck' else None,
             'engaged': pilot.engaged, 'foreground': pilot.foreground_ok, 'mission': pilot.mission,

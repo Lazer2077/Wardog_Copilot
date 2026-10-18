@@ -69,3 +69,63 @@ def test_off_route_watchdog_accepts_zero_timestamp():
     assert not d.step(state(y=60, speed=4), 0).replan
     assert not d.step(state(y=60, speed=4), 2).replan
     assert d.step(state(y=60, speed=4), 3.1).replan
+
+
+@pytest.mark.parametrize('motion',[None,float('nan'),float('inf'),-.1,1.])
+def test_no_stuck_reverse_without_valid_static_visual_evidence(motion):
+    d = driver()
+    for i in range(350):
+        out = d.step(state(),i*.1,motion_level=motion)
+        assert out.mode == 'drive' and out.axes['throttle'] >= 0
+    assert d.recovery.attempts == 0
+
+
+def test_startup_grace_and_sustained_low_speed_are_both_required():
+    t = TruckTuning(startup_grace_s=3,stuck_s=1)
+    d = driver(t)
+    for i in range(40):
+        assert d.step(state(),i*.1,motion_level=0.).mode == 'drive'
+    assert d.step(state(),4.1,motion_level=0.).mode == 'reverse'
+    moving = driver(t)
+    for i in range(150):
+        assert moving.step(state(x=i*.2,speed=2),i*.1,motion_level=0.).mode == 'drive'
+
+
+def test_cooldown_and_shared_attempt_budget_survive_route_and_controller_reset():
+    from wardog_ad.controllers import TruckRecoveryState
+    t = TruckTuning(startup_grace_s=1,stuck_s=1,reverse_s=.4,bypass_s=.4,
+                    recovery_cooldown_s=3,max_reverse_attempts=2)
+    guard = TruckRecoveryState()
+    d = TruckDriver(Path([(0,0),(200,0)],smoothing=0),t,1,recovery=guard)
+    starts=[];last='drive';blocked=None
+    for i in range(200):
+        now=i*.1
+        out=d.step(state(),now,motion_level=0.)
+        if out.mode=='reverse' and last!='reverse':starts.append(now)
+        last=out.mode
+        if out.takeover:
+            blocked=out
+            break
+    assert len(starts)==2
+    assert starts[1]-starts[0] >= t.reverse_s+t.bypass_s+t.recovery_cooldown_s+t.stuck_s
+    assert blocked.mode=='blocked' and blocked.axes['throttle']==0 and not blocked.replan
+    d.set_path(Path([(0,0),(300,0)],smoothing=0))
+    assert guard.attempts==2
+    recreated=TruckDriver(d.path,t,1,recovery=guard)
+    for i in range(41):out=recreated.step(state(),30+i*.1,motion_level=0.)
+    assert out.takeover and guard.attempts==2
+    # Only physically leaving the recovery area restores the budget.
+    escaped=TruckDriver(d.path,t,1,recovery=guard)
+    escaped.step(state(x=40,speed=3),40,motion_level=1.)
+    assert guard.attempts==0
+
+
+def test_kturns_share_grace_cooldown_and_reverse_limit():
+    t = TruckTuning(startup_grace_s=1,reverse_s=.5,recovery_cooldown_s=2,max_reverse_attempts=1)
+    d=driver(t)
+    assert d.step(state(heading=270),0,motion_level=0.).mode=='recovery wait'
+    assert d.step(state(heading=270),1,motion_level=0.).mode=='kturn'
+    assert d.step(state(heading=270),1.5,motion_level=0.).mode=='recovery wait'
+    assert d.step(state(heading=270),3,motion_level=0.).mode=='recovery wait'
+    out=d.step(state(heading=270),3.6,motion_level=0.)
+    assert out.takeover and out.axes['throttle']==0
