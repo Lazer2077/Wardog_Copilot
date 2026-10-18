@@ -32,7 +32,8 @@ class CollectionMapPicker:
         tk.Checkbutton(bar,text='跟随当前地图',variable=self.follow).pack(side='left',padx=4)
         tk.Checkbutton(self.win,text='设置目标时固定此图（关闭自动切图）',variable=self.pin).pack(anchor='w',padx=10)
         self.canvas = tk.Canvas(self.win,bg='#111923',highlightthickness=0)
-        self.canvas.pack(padx=10,pady=4)
+        self.canvas.pack(fill='both',expand=True,padx=10,pady=4)
+        self.canvas.bind('<Configure>',self._resized)
         self.canvas.bind('<Button-1>',self.choose)
         self.status = tk.Label(self.win,text='绿点：当前位置 · 橙点：目的地\n蓝线：参考路线；需要改目的地时左键点选。',wraplength=400 if embedded else 720)
         self.status.pack(fill='x',padx=10,pady=5)
@@ -48,12 +49,23 @@ class CollectionMapPicker:
     def load(self):
         self.assets = load_map(self.choice.get(),self.c.assets.root)
         with Image.open(self.assets.image_path) as raw:
+            self.image = raw.convert('RGB')
             self.scale = min((400 if self.embedded else 720)/raw.width,(430 if self.embedded else 650)/raw.height,
                              (self.win.winfo_screenwidth()-180)/raw.width,
                              (self.win.winfo_screenheight()-240)/raw.height)
             self.size = int(raw.width*self.scale),int(raw.height*self.scale)
-            self.photo = ImageTk.PhotoImage(raw.convert('RGB').resize(self.size,Image.Resampling.LANCZOS))
         self.canvas.config(width=self.size[0],height=self.size[1])
+        self._render(max(self.canvas.winfo_width(), self.size[0]),
+                     max(self.canvas.winfo_height(), self.size[1]))
+
+    def _resized(self,event):
+        if hasattr(self,'image'):
+            self._render(event.width,event.height)
+
+    def _render(self,width,height):
+        self.scale = min(max(1,width)/self.image.width,max(1,height)/self.image.height)
+        self.size = max(1,int(self.image.width*self.scale)),max(1,int(self.image.height*self.scale))
+        self.photo = ImageTk.PhotoImage(self.image.resize(self.size,Image.Resampling.LANCZOS))
         self.canvas.delete('all')
         self.canvas.create_image(0,0,image=self.photo,anchor='nw')
 
@@ -66,6 +78,8 @@ class CollectionMapPicker:
             self.c.toggle_pause()
 
     def choose(self,event):
+        if not (0 <= event.x < self.size[0] and 0 <= event.y < self.size[1]):
+            return  # Letterboxed space is outside the map.
         point = [event.x/self.scale,event.y/self.scale]
         try:
             self.pause_for_edit()

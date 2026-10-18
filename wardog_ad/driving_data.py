@@ -648,20 +648,21 @@ class CollectionPanel:
         from .key_display import KeyStateDisplay
         from .panel import _no_activate
         from .ui_theme import (ACCENT, GREEN, SURFACE, MUTED, OpacityControl, window_theme,
-                               style_widgets, dark_titlebar, save_opacity)
+                               style_widgets, dark_titlebar, save_opacity, ScrollPanel)
         self.c = collector
         self.root = root = tk.Tk()
         root.title('WARDOGS 手动驾驶采集（只读）')
         root.attributes('-topmost', True)
         root.protocol('WM_DELETE_WINDOW', collector.stop_event.set)
         window_theme(root, collector.cfg.ui.collection_opacity)
-        root.resizable(False, False)
+        root.resizable(True, True)
         body = tk.Frame(root)
         body.pack(fill='both',expand=True)
         map_host = tk.Frame(body)
-        map_host.pack(side='left',fill='both',padx=(4,0))
-        controls = tk.Frame(body)
-        controls.pack(side='right',fill='both',expand=True)
+        map_host.pack(side='left',fill='both',expand=True,padx=(4,0))
+        rail = ScrollPanel(body, height=580)
+        rail.pack(side='right',fill='y')
+        controls = rail.body
         from .collection_map import CollectionMapPicker
         self.map_picker = CollectionMapPicker(map_host,collector,embedded=True)
         brand = tk.Label(controls, text='WARDOGS  /  驾驶数据采集', font=('Microsoft YaHei UI', 13, 'bold'))
@@ -710,6 +711,9 @@ class CollectionPanel:
         brand.configure(fg=ACCENT)
         dark_titlebar(root)
         root.update_idletasks()
+        rail.canvas.configure(width=controls.winfo_reqwidth())
+        rail.bind_wheel()
+        root.minsize(controls.winfo_reqwidth() + 360, 420)
         _no_activate(root)
         root.geometry(f'+{max(0, root.winfo_screenwidth() - root.winfo_reqwidth() - 20)}+30')
         root.after(100, self.refresh)

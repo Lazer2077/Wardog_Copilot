@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 import tkinter as tk
 from .ui_theme import (SURFACE, TEXT, MUTED, ACCENT, GREEN, PURPLE, AMBER, OpacityControl,
-                       window_theme, style_widgets, dark_titlebar, save_opacity)
+                       window_theme, style_widgets, dark_titlebar, save_opacity, ScrollPanel)
 
 STATUS_CN = {'map search': '识别地图中', 'standby': '待机', 'searching': '定位中', 'lost': '定位丢失', 'no goal': '无目标', 'drive': '行驶',
              'paused': '已暂停',
@@ -44,7 +44,7 @@ class ControlPanel:
         self.root = root = tk.Tk()
         root.title('WARDOGS 自动驾驶')
         root.attributes('-topmost', True)
-        root.resizable(False, False)
+        root.resizable(True, True)
         root.protocol('WM_DELETE_WINDOW', self.close)
         window_theme(root, pilot.cfg.ui.panel_opacity)
         body = tk.Frame(root)
@@ -52,8 +52,9 @@ class ControlPanel:
         self.map_host = tk.Frame(body)
         if not flares_only:
             self.map_host.pack(side='left',fill='both',expand=True)
-        controls = tk.Frame(body)
-        controls.pack(side='right',fill='both')
+        rail = ScrollPanel(body, height=580)
+        rail.pack(side='right',fill='y')
+        controls = rail.body
         font = ('Microsoft YaHei UI', 10)
         header = tk.Frame(controls, padx=14, pady=10)
         header.pack(fill='x', padx=8, pady=(8, 1))
@@ -95,6 +96,9 @@ class ControlPanel:
         self.brand.configure(fg=ACCENT)
         dark_titlebar(root)
         root.update_idletasks()
+        rail.canvas.configure(width=controls.winfo_reqwidth())
+        rail.bind_wheel()
+        root.minsize(controls.winfo_reqwidth() + (560 if not flares_only else 30), 420)
         _no_activate(root)
         root.geometry(f'+{max(0,root.winfo_screenwidth() - root.winfo_reqwidth() - 30)}+40')
 
