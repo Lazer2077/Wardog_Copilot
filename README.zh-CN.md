@@ -6,6 +6,12 @@
 
 **仅供非商业科研、技术交流与个人学习，严禁商用。** 这是实验性研究代码，不是成熟的自动驾驶产品，也不保证任务完成、避障、着陆或导弹规避成功。使用条款见 [LICENSE](LICENSE)，第三方声明见 [NOTICE](NOTICE)。
 
+## 致谢
+
+特别感谢 **[greatredo 及 wardogs-navigator 的贡献者](https://github.com/greatredo/wardogs-navigator)**。该项目为本项目的地图导航提供了重要基础：地图图像、预计算 SIFT 特征、道路网络和坐标转换数据均从单独下载的 wardogs-navigator 本地仓库加载；本项目的小地图定位代码也参考并改编了其 SIFT 匹配与箭头朝向识别方法。
+
+基于这些成果开展后续工作时，请保留对上游项目的署名。上游代码继续遵守 Apache-2.0 许可，地图素材保留各自权利；详细署名与保留的许可声明见 [NOTICE](NOTICE) 和 [LICENSES](LICENSES)。
+
 ## 程序如何获取信息
 
 - 输入：外部屏幕截图、小地图、HUD 数字与罗盘 OCR、扬声器声音回采，以及系统报告的按键状态。

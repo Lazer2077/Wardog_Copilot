@@ -6,6 +6,12 @@ A **screen- and audio-based research prototype** for vehicle navigation and cont
 
 **For non-commercial scientific research, technical exchange and personal learning only. Commercial use is strictly prohibited.** This is experimental code, not a finished autopilot. Mission completion, obstacle avoidance, landing and missile evasion are not guaranteed. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
+## Acknowledgments
+
+Special thanks to **[greatredo and the wardogs-navigator contributors](https://github.com/greatredo/wardogs-navigator)**. Their work provides an important foundation for this project's map navigation: map imagery, precomputed SIFT features, road networks and coordinate transforms are loaded from a separate local checkout of wardogs-navigator. Our minimap localization code adapts its SIFT matching and arrow-heading approach.
+
+Please credit the upstream project when building on these contributions. Upstream code retains its Apache-2.0 license; map assets retain their respective rights. Attribution and retained license notices are in [NOTICE](NOTICE) and [LICENSES](LICENSES).
+
 ## Observation and control boundaries
 
 - Inputs: external screenshots, minimap imagery, HUD/compass OCR, speaker loopback audio and key states reported by Windows.
