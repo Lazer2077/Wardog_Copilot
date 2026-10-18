@@ -1,0 +1,41 @@
+WARDOGS Copilot Non-Commercial Research License 1.0
+
+Copyright (c) 2026 Lazer2077 and contributors.
+
+1. Permitted purpose
+Subject to these terms, permission is granted to use, study, copy, modify and
+redistribute the original portions of this project solely for non-commercial
+scientific research, academic exchange and personal learning.
+
+2. Commercial use is prohibited
+You may not sell, sublicense for payment, rent, provide paid access or paid
+services using this software, integrate it into commercial products or services,
+or otherwise exploit it or its derivatives for commercial advantage or monetary
+compensation. A separate written license from the applicable rights holders is
+required for any use outside the permission in section 1.
+
+3. Redistribution
+Redistributions of the original project portions or modifications must retain
+this license, copyright notices and attribution, clearly identify modifications,
+and remain subject to the same purpose and non-commercial restrictions. No
+trademark rights or endorsement are granted.
+
+4. Third-party materials
+These restrictions apply only to portions whose rights are held by this project
+and its contributors. Third-party code, adapted upstream portions, map metadata,
+assets and dependencies remain governed by their original licenses and rights.
+Nothing in this license restricts rights already granted by those licenses.
+See NOTICE, LICENSES/ and component-level notices. Game assets and trademarks
+remain the property of their respective owners and are not licensed here.
+
+5. No warranty or liability
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NON-INFRINGEMENT. TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE
+LAW, THE AUTHORS AND CONTRIBUTORS SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGE
+OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+中文说明（英文条款为准）：本项目原创部分仅允许用于非商业科研、学术交流和个人学习。
+严禁销售、收费服务、商业产品集成及其他商业用途。修改和再分发须保留版权、署名及
+同样的用途限制。第三方代码、改编的上游部分、地图和依赖仍遵循各自原有许可证；
+本许可证不撤销第三方许可证已经授予的权利。软件按现状提供，不保证适用性或可靠性。

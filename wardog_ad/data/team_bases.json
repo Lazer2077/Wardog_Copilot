@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "retrieved_date": "2026-10-18",
+  "coordinate_system": "game x/y; 100 meters per unit",
+  "representative": "deployment board; approximate player location within HQ, not exact vehicle spawn",
+  "maps": {
+    "ozeti": {
+      "source": "https://github.com/apollyon-sys/wardogs-calculator/blob/main/maps/ozeti.json",
+      "revision": "public dataset retrieved 2026-10-18",
+      "bases": [
+        {
+          "id": "valkyra",
+          "name": "红队 Valkyra",
+          "color": "#ef5350",
+          "game_point": [
+            137.88,
+            67.26
+          ],
+          "sigma_m": 200
+        },
+        {
+          "id": "manticore",
+          "name": "绿队 Manticore",
+          "color": "#66bb6a",
+          "game_point": [
+            68.42,
+            87.86
+          ],
+          "sigma_m": 200
+        },
+        {
+          "id": "lonestar",
+          "name": "蓝队 Lonestar",
+          "color": "#42a5f5",
+          "game_point": [
+            83.68,
+            31.04
+          ],
+          "sigma_m": 200
+        }
+      ]
+    },
+    "bakurani": {
+      "source": "https://github.com/apollyon-sys/wardogs-calculator/blob/main/maps/bakurani.json",
+      "revision": "s2-20261016",
+      "bases": [
+        {
+          "id": "valkyra",
+          "name": "红队 Valkyra",
+          "color": "#ef5350",
+          "game_point": [
+            118.12,
+            77.3
+          ],
+          "sigma_m": 200
+        },
+        {
+          "id": "manticore",
+          "name": "绿队 Manticore",
+          "color": "#66bb6a",
+          "game_point": [
+            54.92,
+            99.72
+          ],
+          "sigma_m": 200
+        },
+        {
+          "id": "lonestar",
+          "name": "蓝队 Lonestar",
+          "color": "#42a5f5",
+          "game_point": [
+            66.8,
+            35.24
+          ],
+          "sigma_m": 200
+        }
+      ]
+    },
+    "zestafona": {
+      "source": "https://github.com/apollyon-sys/wardogs-calculator/blob/main/maps/zestafona.json",
+      "revision": "public dataset retrieved 2026-10-18",
+      "bases": [
+        {
+          "id": "valkyra",
+          "name": "红队 Valkyra",
+          "color": "#ef5350",
+          "game_point": [
+            38.895616,
+            124.862464
+          ],
+          "sigma_m": 200
+        },
+        {
+          "id": "manticore",
+          "name": "绿队 Manticore",
+          "color": "#66bb6a",
+          "game_point": [
+            105.054208,
+            115.294208
+          ],
+          "sigma_m": 200
+        },
+        {
+          "id": "lonestar",
+          "name": "蓝队 Lonestar",
+          "color": "#42a5f5",
+          "game_point": [
+            68.23935999999999,
+            66.322432
+          ],
+          "sigma_m": 200
+        }
+      ]
+    }
+  }
+}

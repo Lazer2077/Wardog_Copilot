@@ -1,0 +1,5 @@
+# Install a PyTorch wheel matching your CUDA runtime if GPU training is desired.
+# The first experiment defaults to CPU so it can coexist with the running game.
+torch>=2.5,<3
+numpy>=1.26
+opencv-python-headless>=4.8

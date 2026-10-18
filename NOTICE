@@ -1,0 +1,28 @@
+wardog_ad
+=========
+
+Original project portions: Copyright (c) 2026 Lazer2077 and contributors.
+See LICENSE for non-commercial research, exchange and learning terms.
+Third-party and upstream-adapted portions retain their original licenses;
+the project's non-commercial restrictions do not override upstream grants.
+
+Map imagery, pre-computed SIFT features, road networks and game coordinate
+transforms are loaded at runtime from a local checkout of
+greatredo/wardogs-navigator (https://github.com/greatredo/wardogs-navigator),
+which is licensed under Apache-2.0 for its code; see that project's
+THIRD_PARTY_NOTICES.md for the rights to the map assets. Game imagery and
+trademarks belong to their respective owners.
+
+wardog_ad/localization.py adapts the minimap matching approach (SIFT feature
+mask, ratio test, RANSAC partial affine, local re-tracking and convexity-defect
+arrow heading) from wardogs_nav/vision.py of the same project (Apache-2.0).
+Upstream copyright: Copyright 2026 Wardogs Navigator contributors.
+The Apache-2.0 license and upstream NOTICE are retained in LICENSES/.
+
+wardog_ad/data/team_bases.json contains deployment-board coordinate facts derived
+from apollyon-sys/wardogs-calculator/maps/{ozeti,bakurani,zestafona}.json, retrieved
+2026-10-18. The Bakurani source uses its s2-20261016 revision. Coordinates are
+reference points inside headquarters, not independently verified vehicle spawns.
+Original project: https://github.com/apollyon-sys/wardogs-calculator (MIT).
+Copyright (c) 2026 Apollyon. The MIT notice is included in
+wardog_ad/data/wardogs-calculator-LICENSE.txt.
