@@ -62,6 +62,11 @@ class MapPicker:
         self.sidebar = ScrollPanel(self.win, height=self.ch)
         self.sidebar.grid(row=0, column=1, sticky='ns')
         side = self.sidebar.body
+        zoom_bar = tk.Frame(side)
+        zoom_bar.pack(fill='x', pady=(0, 6))
+        tk.Button(zoom_bar, text='＋', command=lambda: self.zoom_by(1.25)).pack(side='left')
+        tk.Button(zoom_bar, text='−', command=lambda: self.zoom_by(.8)).pack(side='left', padx=4)
+        tk.Button(zoom_bar, text='全图', command=self.fit_map).pack(side='left')
         brand = tk.Label(side, text='WARDOGS  /  战术地图', font=('Microsoft YaHei UI', 13, 'bold'))
         brand.pack(anchor='w', pady=(0, 10))
 
@@ -373,10 +378,25 @@ class MapPicker:
 
     # ------------------------------------------------------------ mouse
     def _wheel(self, event):
+        if event.delta:
+            self.zoom_by(1.25 if event.delta > 0 else .8, event.x, event.y)
+        return 'break'
+
+    def fit_map(self):
         self._auto_center_pending = False
-        before = self.to_map(event.x, event.y)
-        self.zoom = min(12.0, max(.2, self.zoom * (1.25 if event.delta > 0 else 0.8)))
-        after = self.to_map(event.x, event.y)
+        self.zoom = min(self.cw / self.assets.width, self.ch / self.assets.height)
+        self.cx, self.cy = self.assets.width / 2, self.assets.height / 2
+        self._render_map()
+        self._draw_overlay()
+
+    def zoom_by(self, factor, x=None, y=None):
+        self._auto_center_pending = False
+        x = self.cw / 2 if x is None else x
+        y = self.ch / 2 if y is None else y
+        before = self.to_map(x, y)
+        minimum = min(self.cw / self.assets.width, self.ch / self.assets.height) * .5
+        self.zoom = min(12.0, max(minimum, self.zoom * factor))
+        after = self.to_map(x, y)
         self.cx += before[0] - after[0]
         self.cy += before[1] - after[1]
         self.view_dirty = True
