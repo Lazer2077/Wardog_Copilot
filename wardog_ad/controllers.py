@@ -206,7 +206,8 @@ class TruckDriver:
         frozen = motion_level is not None and math.isfinite(motion_level) and 0 <= motion_level < t.stuck_motion_threshold
         grace = now-self.started_at < t.startup_grace_s
         cooling = now < self.recovery.cooldown_until
-        info.update(stuck_span_s=span,stuck_moved_m=moved_m,stuck_window_speed_ms=window_speed,
+        info.update(stuck_span_s=span,stuck_moved_m=moved_m,
+                    stuck_window_speed_ms=window_speed if math.isfinite(window_speed) else None,
                     recovery_reason='startup_grace' if grace else 'cooldown' if cooling
                     else 'no_visual_motion' if motion_level is None else 'monitoring')
         if (not grace and not cooling and throttle > 0.4 and frozen

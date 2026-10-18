@@ -81,10 +81,13 @@ def test_no_stuck_reverse_without_valid_static_visual_evidence(motion):
 
 
 def test_startup_grace_and_sustained_low_speed_are_both_required():
+    import json
     t = TruckTuning(startup_grace_s=3,stuck_s=1)
     d = driver(t)
     for i in range(40):
-        assert d.step(state(),i*.1,motion_level=0.).mode == 'drive'
+        out = d.step(state(),i*.1,motion_level=0.)
+        assert out.mode == 'drive'
+        json.dumps(out.info,allow_nan=False)
     assert d.step(state(),4.1,motion_level=0.).mode == 'reverse'
     moving = driver(t)
     for i in range(150):
