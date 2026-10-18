@@ -14,6 +14,7 @@ class Region:
     top: int = 0
     width: int = 0
     height: int = 0
+    reference: tuple = ()              # calibration monitor: left, top, width, height
 
     @property
     def valid(self) -> bool:

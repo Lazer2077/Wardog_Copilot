@@ -1,8 +1,15 @@
 # Initial setup / 初始配置
 
 The example contains no usable screen calibration: zero-sized rectangles disable
-those inputs. Repeat calibration after resolution, scaling, window or HUD changes.
-示例没有可用标定；宽高为零表示禁用。分辨率、缩放、窗口位置或 HUD 改变后须重新标定。
+those inputs. New interactive calibrations save a `reference` monitor rectangle
+(`[left, top, width, height]`). Captures scale automatically for resolution changes
+on the same display with the same aspect ratio, including collector navigation crops.
+Window position, HUD layout, aspect-ratio changes or ambiguous monitor changes still
+require recalibration. Old regions without `reference` remain absolute pixels.
+示例没有可用标定；宽高为零表示禁用。新标定自动保存显示器位置与分辨率 `reference`，
+同屏幕、同宽高比的分辨率变化会自动换算截屏区域，采集器导航裁剪也使用相同换算。
+窗口位置、HUD 布局、宽高比改变或多屏归属不明确时仍需重新标定。
+旧配置没有 `reference` 时仍按绝对像素读取，越界会提示错误，不会自动猜测旧分辨率。
 
 ```powershell
 if (-not (Test-Path config.json)) { Copy-Item config.example.json config.json }
@@ -25,6 +32,9 @@ Edit the generated local `config.json` using **absolute physical screen pixels**
 
 填写物理屏幕像素的 left/top/width/height。当前 CLI 不会自动标定这两个矩形；
 小地图标定不等于仪表标定。先确认读数，再确认地图、位置、航向和目的地后允许驾驶。
+For manually entered HUD/compass regions, also set `reference` to the display
+rectangle used for those coordinates (for example `[0, 0, 3840, 2160]` for a 4K
+primary display). 手填 HUD / 罗盘区域时也应填写这些坐标所属显示器的 `reference`。
 
 ```powershell
 python -m wardog_ad hud-test

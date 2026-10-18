@@ -70,6 +70,8 @@ def cmd_calibrate(args):
         from .config import Region
         client = Region(monitor['left'], monitor['top'], monitor['width'], monitor['height'])
         region = calibration.region if calibration is not None and calibration.region.valid else cfg.minimap
+        from .capture import resolve_region
+        region = resolve_region(region, cap.monitors())
         roi = crop_region(screen, client, region)
         if roi is None:
             sys.exit('Calibrate the minimap region on this monitor first.')

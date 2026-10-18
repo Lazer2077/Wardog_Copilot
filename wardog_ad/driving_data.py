@@ -43,6 +43,15 @@ def navigation_validity(nav, *, view, context_id, now):
 
 def crop_region(image, client: Region, roi: Region):
     """Absolute physical screen ROI -> original, unscaled client image."""
+    if roi.reference:
+        from .capture import resolve_region, CaptureRegionError
+        try:
+            # Use actual monitors, not the client size: a windowed game is not
+            # equivalent to a display-resolution change.
+            from .capture import display_monitors
+            roi = resolve_region(roi, display_monitors())
+        except CaptureRegionError:
+            return None
     x, y = roi.left - client.left, roi.top - client.top
     if not roi.valid or x < 0 or y < 0 or x + roi.width > image.shape[1] or y + roi.height > image.shape[0]:
         return None
@@ -667,6 +676,7 @@ class CollectionPanel:
         self.map_picker = CollectionMapPicker(map_host,collector,embedded=True)
         brand = tk.Label(controls, text='WARDOGS  /  驾驶数据采集', font=('Microsoft YaHei UI', 13, 'bold'))
         brand.pack(anchor='w', padx=14, pady=(12, 4))
+        tk.Button(controls, text='最小化', command=root.iconify).pack(anchor='e', padx=12)
         self.record_badge = tk.Label(controls, text='PAUSED  /  暂停', font=('Microsoft YaHei UI', 10, 'bold'), padx=12, pady=4)
         self.record_badge.pack(fill='x', padx=12, pady=4)
         self.keys = KeyStateDisplay(controls, observed=lambda: set(collector.keys))

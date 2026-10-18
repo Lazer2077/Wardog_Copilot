@@ -31,8 +31,12 @@ def _no_activate(root: tk.Tk):
         user32 = ctypes.windll.user32
         hwnd = user32.GetParent(root.winfo_id()) or root.winfo_id()
         GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOPMOST, WS_EX_TOOLWINDOW = -20, 0x08000000, 0x8, 0x80
+        WS_EX_APPWINDOW = 0x00040000
         style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWINDOW)
+        # Keep a normal taskbar window with a minimize button, while clicks still
+        # leave keyboard input in the game.
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE,
+                             (style & ~WS_EX_TOOLWINDOW) | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_APPWINDOW)
     except Exception:
         pass
 
@@ -60,6 +64,7 @@ class ControlPanel:
         header.pack(fill='x', padx=8, pady=(8, 1))
         self.brand = tk.Label(header, text='WARDOGS', font=('Segoe UI', 16, 'bold'))
         self.brand.pack(side='left')
+        tk.Button(header, text='最小化', command=root.iconify).pack(side='right', padx=(8, 0))
         self.mode_badge = tk.Label(header, text='MANUAL', font=('Consolas', 10, 'bold'), padx=10, pady=4)
         self.mode_badge.pack(side='right')
         bar = tk.Frame(controls, padx=8, pady=10)
@@ -126,6 +131,11 @@ class ControlPanel:
         lines = []
         if not self.flares_only:
             lines.append(f'地图: {p.assets.name}' + (f'  {tel.map_status}' if tel.map_status else ''))
+            errors = getattr(p.sensors, 'capture_errors', {})
+            if errors:
+                lines.append('截屏区域无效：请按当前分辨率重新标定小地图 / HUD / 罗盘')
+            elif tel.fix is not None and not tel.fix.valid:
+                lines.append(f'定位诊断: {tel.fix.reason}')
             st = tel.state
             lines.append(f'任务: {MISSION_CN.get(p.mission, p.mission)}   状态: {STATUS_CN.get(tel.status, tel.status)}'
                          f'   {"自动驾驶中" if p.engaged else "手动"}')

@@ -151,7 +151,10 @@ def test_tick_switches_map_without_resuming_old_mission():
     pilot.tick(3.1)
     tel = pilot.tick(4.1)
     assert cfg.map_id == 'b' and pilot.destination == (20, 30)
-    assert pilot.goal is None and pilot.mission == 'idle' and not pilot.engaged
+    # The new map's saved destination may populate the idle route preview;
+    # this must never resume the old return mission or enable key output.
+    assert pilot.goal == (20, 30) and pilot.mission == 'idle' and not pilot.engaged
+    assert not pilot.keyboard.down
     assert tel is pilot.telemetry and tel.map_status == 'map confirmed: b'
 
 

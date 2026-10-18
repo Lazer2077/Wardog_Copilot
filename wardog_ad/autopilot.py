@@ -603,6 +603,9 @@ class Autopilot:
     def _locate_now(self):
         image = self._minimap_small()
         if image is None:
+            error = getattr(self.sensors, 'capture_errors', {}).get('minimap')
+            if error:
+                return Fix(reason=error, timestamp=time.monotonic())
             return None
         fix = self.locator.locate(image, self.cfg.localization_anchor, self.cfg.north_up)
         if fix.valid and self.cfg.refine_fixes:
@@ -790,7 +793,8 @@ class Autopilot:
             if self.pending_go:
                 self.engage()
         else:
-            fix = self.locator.locate(image, cfg.localization_anchor, cfg.north_up) if image is not None else Fix(reason='no image')
+            fix = self.locator.locate(image, cfg.localization_anchor, cfg.north_up) if image is not None else Fix(
+                reason=getattr(self.sensors, 'capture_errors', {}).get('minimap', 'no image'))
         if (fix.valid and cfg.refine_fixes and image is not None
                 and isinstance(self.locator, MinimapLocalizer)):
             fix = self._refiner().refine(image, fix, cfg.localization_anchor)
@@ -1022,6 +1026,7 @@ class ScreenSensors:
         self._factory = ScreenCapture
         self._tap = None
         self._hud = None
+        self.capture_errors = {}
 
     def _cap(self):
         # mss handles are per-thread on Windows
@@ -1029,14 +1034,27 @@ class ScreenSensors:
             self._local.cap = self._factory()
         return self._local.cap
 
+    def _grab(self, region, name):
+        from .capture import CaptureRegionError
+        if not region.valid:
+            self.capture_errors[name] = f'{name}: capture region not calibrated'
+            return None
+        try:
+            image = self._cap().grab(region)
+        except CaptureRegionError as error:
+            self.capture_errors[name] = f'{name}: {error}'
+            return None
+        self.capture_errors.pop(name, None)
+        return image
+
     def minimap(self):
-        return self._cap().grab(self.cfg.localization_region) if self.cfg.localization_region.valid else None
+        return self._grab(self.cfg.localization_region, 'minimap')
 
     def main_view(self):
-        return self._cap().grab(self.cfg.main_view) if self.cfg.main_view.valid else None
+        return self._grab(self.cfg.main_view, 'main_view') if self.cfg.main_view.valid else None
 
     def lock_roi(self):
-        return self._cap().grab(self.cfg.lock_warning) if self.cfg.lock_warning.valid else None
+        return self._grab(self.cfg.lock_warning, 'lock_warning') if self.cfg.lock_warning.valid else None
 
     def hud(self):
         if not self.cfg.hud.valid:
@@ -1044,8 +1062,8 @@ class ScreenSensors:
         if self._hud is None:
             from .hud import HudReader
             self._hud = HudReader(self.cfg.hud_glyphs)
-        compass = self._cap().grab(self.cfg.compass) if self.cfg.compass.valid else None
-        return self._hud.read(self._cap().grab(self.cfg.hud), compass, time.monotonic())
+        compass = self._grab(self.cfg.compass, 'compass') if self.cfg.compass.valid else None
+        return self._hud.read(self._grab(self.cfg.hud, 'hud'), compass, time.monotonic())
 
     def truck_heading(self):
         """Read the shared top compass only; truck dashboards are not helicopter HUDs."""
@@ -1054,7 +1072,7 @@ class ScreenSensors:
         from .hud import HudReader
         if not hasattr(self._local,'truck_compass'):
             self._local.truck_compass = HudReader(self.cfg.hud_glyphs)
-        return self._local.truck_compass.read(None,self._cap().grab(self.cfg.compass),time.monotonic()).heading
+        return self._local.truck_compass.read(None,self._grab(self.cfg.compass, 'compass'),time.monotonic()).heading
 
     def save_hud_crop(self, tag: str):
         """Keep the speed digits that disagreed with the minimap track (to fix the reader)."""
@@ -1069,7 +1087,8 @@ class ScreenSensors:
         if not self.cfg.hud.valid:
             return None
         from .hud import read_pitch
-        return read_pitch(self._cap().grab(self.cfg.hud))
+        image = self._grab(self.cfg.hud, 'hud')
+        return read_pitch(image) if image is not None else None
 
     def audio(self):
         if self._tap is None:

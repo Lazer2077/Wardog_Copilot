@@ -43,7 +43,13 @@ def feature_mask(image: np.ndarray, minimap: bool = True) -> np.ndarray:
     mask[:, :5] = 0
     mask[:, -5:] = 0
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    overlay = ((hsv[:, :, 1] > 80) | (hsv[:, :, 2] > 215)).astype(np.uint8)
+    coloured = (hsv[:, :, 1] > 80).astype(np.uint8)
+    # Capture-zone tints cover large parts of the minimap but preserve terrain
+    # texture. Mask small coloured symbols, not the entire tinted territory.
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(coloured, 8)
+    small = np.zeros(count, np.uint8)
+    small[1:] = (stats[1:, cv2.CC_STAT_AREA] < w*h*.03)
+    overlay = ((small[labels] > 0) | (hsv[:, :, 2] > 215)).astype(np.uint8)
     mask[cv2.dilate(overlay, np.ones((7, 7), np.uint8)) > 0] = 0
     return mask
 
