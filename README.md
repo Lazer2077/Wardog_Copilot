@@ -1,6 +1,8 @@
-# WARDOGS Copilot
+# WARDOGS Copilot v0.1
 
 **English** | [简体中文](README.zh-CN.md)
+
+**Current version: v0.1 — an early experimental prototype.** Features and interfaces are still evolving, and real-game reliability requires further validation.
 
 A **screen- and audio-based research prototype** for vehicle navigation and control in WARDOGS. The current focus is helicopter navigation, automatic flares and J-hook maneuvers. Ground-vehicle autonomy and human-demonstration collection are under active development.
 
