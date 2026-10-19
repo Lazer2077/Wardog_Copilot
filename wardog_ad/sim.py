@@ -102,6 +102,8 @@ class SimWorld:
     heli_align: float = math.inf       # (fit-slip on 13:16 suggested 0.02 = sliding; tests choose it explicitly)
     hud_drops_hundreds: bool = False   # HUD reader bug seen at 10:56: 100-199 km/h read without the '1'
     hud_speed_glitch: float = 0.0      # chance per reading of a garbled speed (534 km/h at 12:54)
+    compass_dropout: float = 0.0       # chance per reading that the compass is unreadable (1080p: 86%)
+    compass_garbage: float = 0.0       # chance per reading of a wrong compass value
     hard_landings: int = 0
     touchdowns: list = field(default_factory=list)
     _col_hist: deque = field(default_factory=deque)
@@ -231,9 +233,15 @@ class SimWorld:
             shown -= 100
         if self.hud_speed_glitch and self.rng.random() < self.hud_speed_glitch:
             shown = float(self.rng.integers(300, 999))
+        compass = float(round(b.heading)) % 360
+        roll = self.rng.random()
+        if roll < self.compass_dropout:
+            compass = None
+        elif roll < self.compass_dropout + self.compass_garbage:
+            compass = float(self.rng.integers(0, 360))
         return HudReading(shown, float(round(b.alt)),
                           float(round(b.alt + self.ground_height(b.x, b.y))),
-                          float(round(b.heading)) % 360, self.time,
+                          compass, self.time,
                           pitch=b.pitch / 10.0 + self.rng.normal(0, .03), collective=b.lever + self.rng.normal(0, .01))
 
     def _missiles(self):

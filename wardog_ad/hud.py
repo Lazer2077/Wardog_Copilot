@@ -136,6 +136,39 @@ def parse_number(text: str, label: str | None = None) -> str | None:
     return m.group(0) if m else None
 
 
+CARDINALS = ('N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW')
+
+
+def parse_heading(text: str) -> float | None:
+    """'024NE' / '024 NE' / '024' -> 24.0; None if unreadable or the letters disagree."""
+    m = re.match(r'[\s\-\'.,]*([0-9OoDlI|SB]{3})\s*([NSEW]{0,2})', text or '')
+    if not m:
+        return None
+    digits = m.group(1).translate(OCR_FIX)
+    if not digits.isdigit() or int(digits) >= 360:
+        return None
+    heading = float(digits)
+    letters = m.group(2)
+    if letters:
+        expected = CARDINALS[int((heading + 22.5) // 45) % 8]
+        # near a boundary either neighbour is fine (the game may round differently)
+        nearby = {CARDINALS[int((heading + 22.5 + d) // 45) % 8] for d in (-6, 0, 6)}
+        if letters not in nearby | {expected}:
+            return None
+    return heading
+
+
+def _compass_variants(compass: np.ndarray):
+    gray = cv2.cvtColor(compass, cv2.COLOR_BGR2GRAY) if compass.ndim == 3 else compass
+    f = 280.0 / max(1, gray.shape[1])          # ~4x the 1080p box: what OCR read best
+    big = cv2.resize(gray, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC)
+    _, otsu = cv2.threshold(cv2.GaussianBlur(big, (3, 3), 0), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(4, 4)).apply(big)
+    for v in (otsu, clahe):
+        pad = cv2.copyMakeBorder(v, 20, 20, 20, 20, cv2.BORDER_REPLICATE)
+        yield cv2.cvtColor(pad, cv2.COLOR_GRAY2BGR)
+
+
 def mask_for_ocr(img: np.ndarray, height: int = 60) -> np.ndarray:
     """The HUD digits as black text on white, scaled to ~``height`` px, padded: what OCR reads best."""
     mask = text_mask(img)
@@ -352,13 +385,16 @@ class HudReader:
             return None
 
     def read_heading(self, compass: np.ndarray) -> float | None:
-        img = cv2.resize(compass, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-        self.ocr_calls += 1
-        m = re.match(r'\s*([0-9OoDlI|SB]{1,3})', self.ocr(img))
-        if not m:
-            return None
-        text = m.group(1).translate(OCR_FIX)
-        return float(text) % 360 if text.isdigit() else None
+        """Compass box ('024NE').  At 1920x1080 it is grey text on a bright sky, often darker
+        than the background: the plain crop read nothing (compass seen in 14% of the 22:48
+        ticks).  A binarised (Otsu) or contrast-equalised enlargement reads it; the letters
+        must agree with the number (024 is NE), which throws out misread digits."""
+        for img in _compass_variants(compass):
+            self.ocr_calls += 1
+            heading = parse_heading(self.ocr(img))
+            if heading is not None:
+                return heading
+        return None
 
     def read(self, cluster: np.ndarray | None, compass: np.ndarray | None, now: float) -> HudReading:
         out = HudReading(timestamp=now)
@@ -378,8 +414,8 @@ class HudReader:
         if heading is None:
             return None
         last, candidate = self.last.get('hdg'), self.last.get('hdg_candidate')
-        ok = last is None or now - last[1] > 3.0 or \
-            abs((heading - last[0] + 180) % 360 - 180) <= max_rate * (now - last[1]) + 15
+        gap = last is None or now - last[1] > 3.0
+        ok = (not gap) and abs((heading - last[0] + 180) % 360 - 180) <= max_rate * (now - last[1]) + 15
         if not ok and candidate is not None and abs((heading - candidate[0] + 180) % 360 - 180) <= 5:
             ok = True                   # the same "jump" twice in a row: it is real
         if ok:

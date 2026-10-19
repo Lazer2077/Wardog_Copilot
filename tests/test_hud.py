@@ -140,7 +140,8 @@ def test_ground_liftoff_holds_shift_continuously():
 
 def test_compass_rejects_single_misread():
     reader = HudReader(None, ocr=ScriptedOcr([]))
-    assert reader._plausible_heading(195.0, 0.0) == 195.0
+    assert reader._plausible_heading(195.0, 0.0) is None         # first reading: wait for a second one
+    assert reader._plausible_heading(195.0, 0.05) == 195.0
     assert reader._plausible_heading(95.0, 0.1) is None          # '195' read as '95' (seen in the log)
     assert reader._plausible_heading(196.0, 0.2) == 196.0
     assert reader._plausible_heading(300.0, 0.3) is None
@@ -215,3 +216,23 @@ def test_a_single_garbled_height_is_not_believed(tmp_path):
     assert once.agl_m is None                                 # one frame of '6': not believed yet
     twice = reader.read(cluster_image('50', '6', '300'), None, 3.1)
     assert twice.agl_m == 6                                   # read twice: it is real (a cliff edge)
+
+
+def test_compass_at_1080p_is_read_from_a_bright_sky():
+    """22:48: grey compass digits on a bright sky at 1920x1080 were read 14% of the time."""
+    from wardog_ad.hud import parse_heading
+    assert parse_heading('024NE') == 24 and parse_heading('- 024 NE') == 24
+    assert parse_heading('024SW') is None and parse_heading('1') is None   # letters must match
+
+
+def test_turn_rate_is_forgotten_without_a_compass():
+    """A turn rate frozen at -60 deg/s cancelled the yaw command for 30 s (22:48)."""
+    from wardog_ad.airnav import AirNavigator
+    nav = AirNavigator(1.0)
+    nav.start((0.0, 0.0), 0.0)
+    for k in range(6):                                   # turning left fast, compass readable
+        nav.predict(k * .1, 100.0, (200 - 6 * k) % 360)
+    assert nav.yaw_rate < -30
+    for k in range(6, 40):                               # compass unreadable from here on
+        nav.predict(k * .1, 100.0, None)
+    assert abs(nav.yaw_rate) < 5

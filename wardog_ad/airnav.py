@@ -92,7 +92,12 @@ class AirNavigator:
             if len(self.headings) >= 3:
                 ts, hs = np.array(self.headings).T
                 if np.ptp(ts) > .25:
-                    self.yaw_rate = float(np.polyfit(ts - now, hs, 1)[0])
+                    self.yaw_rate = float(np.clip(np.polyfit(ts - now, hs, 1)[0], -60, 60))
+        elif now - self.last_compass_t > 0.8:
+            # no fresh compass: the turn rate is unknown, not 'the last one'.  A rate frozen at
+            # -60 deg/s (22:48, compass read 14% of the time) cancelled the yaw command for 30 s
+            self.yaw_rate *= 0.5
+            self.headings.clear()
         self._direction_from_fixes(now)
         if speed_kmh is not None:
             if speed_kmh < 6 and pitch is not None and abs(pitch) > .1 and now - self._track_dir_t > 2.0:

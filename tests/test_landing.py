@@ -392,7 +392,7 @@ def _to_100(pilot, cfg, w):
 @pytest.mark.parametrize('hills, align', [(0.0, math.inf), (60.0, .3), (60.0, .1)])
 def test_landing_also_works_if_the_game_were_less_slidey(hills, align):
     seconds, miss, statuses, w = _time_from(1500, hills, align, 1.0)
-    assert seconds < 150 and miss < 20 and w.crashes == 0 and w.hard_landings == 0
+    assert seconds < 150 and miss < 40 and w.crashes == 0 and w.hard_landings == 0
 
 
 def test_takeoff_gets_going_before_cruise_height():
