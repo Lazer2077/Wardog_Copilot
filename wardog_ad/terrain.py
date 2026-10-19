@@ -21,13 +21,38 @@ class TerrainMemory:
         self.cell = cell_px
         self.heights: dict[tuple[int, int], float] = {}
         self.dirty = 0
+        self.removed = 0
         if self.path and self.path.exists():
             with np.load(self.path) as data:
                 for (i, j), h in zip(data['cells'], data['heights']):
                     self.heights[(int(i), int(j))] = float(h)
+            self.removed = 0
+            for _ in range(10):                  # clusters of spikes come off in layers
+                n = self.clean()
+                self.removed += n
+                if not n:
+                    break
 
     def _key(self, x, y):
         return int(math.floor(x / self.cell)), int(math.floor(y / self.cell))
+
+    def clean(self, spike_m: float = 40.0, lowest_m: float = -50.0) -> int:
+        """Drop cells that cannot be real: far above all their neighbours (a garbled AGL / ASL
+        reading - 16:43 at 1080p left 59 of them, with fake 'terrain ahead' all the way) or
+        below sea level.  Returns how many were removed."""
+        bad = []
+        for (i, j), h in self.heights.items():
+            if h < lowest_m:
+                bad.append((i, j))
+                continue
+            near = [self.heights[(i + a, j + b)] for a in (-1, 0, 1) for b in (-1, 0, 1)
+                    if (a or b) and (i + a, j + b) in self.heights]
+            if len(near) >= 3 and h - float(np.median(near)) > spike_m:
+                bad.append((i, j))
+        for k in bad:
+            del self.heights[k]
+        self.dirty += len(bad)
+        return len(bad)
 
     def record(self, pos, ground_asl: float):
         """Remember the highest ground seen in this cell (trees/roofs count: they are obstacles)."""

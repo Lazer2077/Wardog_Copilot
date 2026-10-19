@@ -1086,7 +1086,8 @@ class ScreenSensors:
             from .hud import HudReader
             self._hud = HudReader(self.cfg.hud_glyphs)
         compass = self._grab(self.cfg.compass, 'compass') if self.cfg.compass.valid else None
-        return self._hud.read(self._grab(self.cfg.hud, 'hud'), compass, time.monotonic())
+        return self._hud.read(_hud_size(self._grab(self.cfg.hud, 'hud'), HUD_SIZE),
+                              _hud_size(compass, COMPASS_SIZE), time.monotonic())
 
     def truck_heading(self):
         """Read the shared top compass only; truck dashboards are not helicopter HUDs."""
@@ -1110,7 +1111,7 @@ class ScreenSensors:
         if not self.cfg.hud.valid:
             return None
         from .hud import read_pitch
-        image = self._grab(self.cfg.hud, 'hud')
+        image = _hud_size(self._grab(self.cfg.hud, 'hud'), HUD_SIZE)
         return read_pitch(image) if image is not None else None
 
     def audio(self):
@@ -1123,6 +1124,18 @@ class ScreenSensors:
 
 
 NOT_FOCUSED = 'game window not in front - keys released (click into the game)'
+
+
+HUD_SIZE, COMPASS_SIZE = (720, 270), (140, 55)     # the crops the HUD reader was measured on (4K)
+
+
+def _hud_size(image, size):
+    """Scale a HUD / compass crop to the 4K reference size.  At 1920x1080 the crop is half as
+    big, the digits ~8 px tall, and the reader produced AGL 6 / 339 / 389 at 16:43 (real ~130)
+    - every fake low height a pull-up."""
+    if image is None or image.size == 0 or (image.shape[1], image.shape[0]) == size:
+        return image
+    return cv2.resize(image, size, interpolation=cv2.INTER_CUBIC)
 
 
 def run_live(pilot: Autopilot, *, view: bool = False, engage_now: bool = False, flares_only: bool = False,

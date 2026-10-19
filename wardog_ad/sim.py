@@ -99,7 +99,7 @@ class SimWorld:
     # how fast the direction of travel swings onto the nose (1/s).  inf = always along the
     # nose (arcade); 0 = pure physics (thrust along the nose, drag against the motion), so a
     # fast pedal turn leaves the helicopter sliding on.  Not yet measured in the game.
-    heli_align: float = 0.02           # measured in the game (fit-slip, 13:16): it slides a lot
+    heli_align: float = math.inf       # (fit-slip on 13:16 suggested 0.02 = sliding; tests choose it explicitly)
     hud_drops_hundreds: bool = False   # HUD reader bug seen at 10:56: 100-199 km/h read without the '1'
     hud_speed_glitch: float = 0.0      # chance per reading of a garbled speed (534 km/h at 12:54)
     hard_landings: int = 0

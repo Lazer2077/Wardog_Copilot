@@ -125,7 +125,7 @@ class AircraftTuning:
     decel_ms2: float = 3.0              # planned braking (players dump 270 -> 50 km/h nose-up)
     # landing at the destination / return point
     auto_land: bool = True              # False: hover at the destination and hand over
-    hover_radius_m: float = 15.0        # descend only this close to the point ...
+    hover_radius_m: float = 40.0        # descend only this close to the point ...
     land_zone_m: float = 150.0          # ... but stop and hover from this far (fixes are ~5 m/px)
     overshoot_m: float = 40.0           # final leg: this much farther than the closest pass -> hover
     land_anyway_s: float = 25.0         # cannot centre within this time -> land where we are
@@ -135,7 +135,8 @@ class AircraftTuning:
     jhook_landing: bool = True
     # velocity-vector guidance: point the thrust (nose) where acceleration is needed - the game's
     # helicopter barely turns its motion with the nose (fit-slip on 13:16: 0.02/s)
-    vector_guidance: bool = True
+    vector_guidance: bool = False       # off: at 17:00 the compass was unreadable most of the time, the
+                                        # nose heading wrong, and it circled worse than the old steering
     vg_gain: float = 0.5                # 1/s: velocity error -> acceleration
     vg_decel_ms2: float = 3.5           # braking curve onto the landing point
     vg_dead_ms2: float = 0.3            # smaller accelerations: hold the nose where it is
@@ -172,7 +173,7 @@ class AircraftTuning:
     jhook_max_s: float = 30.0
     jhook_gain: float = 0.5             # 1/s: velocity error -> acceleration along the nose
     jhook_climb_ms: float = 3.0         # climb a little meanwhile (clearance while sliding)
-    slip_align: float = 0.02            # navigator: 1/s the travel direction swings onto the nose
+    slip_align: float = float('inf')    # navigator: 1/s the travel direction swings onto the nose
                                         # (measured: fit-slip on the 12:54 / 13:16 flights; inf = arcade)
     hover_settle_s: float = 1.0         # steady this long over the point before descending
     descend_max_kmh: float = 20.0       # "steady enough" to start the descent

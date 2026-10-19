@@ -89,3 +89,15 @@ def test_heading_from_track_when_the_compass_fails():
         nav.correct(Fix(*true, None, .8, 40, .5, .5, 0, True, 'ok', t))
     assert nav.heading_source == 'track'
     assert abs((nav.heading - 45 + 180) % 360 - 180) < 5
+
+
+def test_terrain_memory_drops_impossible_cells(tmp_path):
+    """Garbled heights (16:43) left 40 m+ spikes and a -288 m cell in the BAKURANI memory."""
+    mem = TerrainMemory(None)
+    for i in range(5):
+        for j in range(5):
+            mem.record(((i + .5) * 8, (j + .5) * 8), 200.0)
+    mem.heights[(2, 2)] = 380.0                               # fake spike
+    mem.heights[(9, 9)] = -288.0                              # impossible
+    assert mem.clean() == 2 and (2, 2) not in mem.heights and (9, 9) not in mem.heights
+    assert mem.clean() == 0

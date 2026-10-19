@@ -31,7 +31,7 @@ class ScriptedOcr:
 
     def __call__(self, img):
         self.calls += 1
-        return self.truth.pop(0)
+        return self.truth.pop(0) if self.truth else ''      # nothing more scripted: OCR saw nothing
 
 
 def test_parse_number_fixes_ocr_confusions():
@@ -53,7 +53,7 @@ def test_reader_learns_templates_then_reads_without_ocr(tmp_path):
     reader = HudReader(tmp_path / 'g.npz', ocr=ocr)
     first = reader.read(cluster_image('120', '34', '567'), None, 0.0)
     assert (first.speed_kmh, first.agl_m, first.asl_m) == (120, 34, 567)
-    second = reader.read(cluster_image('298', '10', '234'), None, 5.0)
+    second = reader.read(cluster_image('298', '10', '234'), None, 15.0)     # a new flight, not a jump
     assert (second.speed_kmh, second.agl_m, second.asl_m) == (298, 10, 234)
     # "10" and "234" were already readable from the templates learned in frame 1
     assert ocr.calls == 4
@@ -194,3 +194,24 @@ def test_glyph_library_drops_templates_learned_from_misreads(tmp_path):
     lib.learn('1', [one])                                            # relearned from a good OCR read
     lib.learn('4', [one])                                            # a later misread is refused
     assert lib.read([one]) == '1' and len(lib.templates['4']) == 1
+
+
+def test_hud_captured_at_1080p_is_read_like_4k(tmp_path):
+    """16:43: the game ran at 1920x1080, the HUD crop was half size and the reader returned
+    AGL 6 / 339 / 389 (real ~130).  Crops are now scaled to the 4K reference first."""
+    from wardog_ad.autopilot import HUD_SIZE, _hud_size
+    full = cluster_image('167', '131', '366')
+    half = cv2.resize(full, (360, 135), interpolation=cv2.INTER_AREA)
+    reader = HudReader(tmp_path / 'g.npz', ocr=ScriptedOcr(['KM/H 167', 'AGL 131', 'ASL 366']))
+    out = reader.read(_hud_size(half, HUD_SIZE), None, 0.0)
+    assert (out.speed_kmh, out.agl_m, out.asl_m) == (167, 131, 366)
+
+
+def test_a_single_garbled_height_is_not_believed(tmp_path):
+    reader = HudReader(tmp_path / 'g.npz', ocr=ScriptedOcr(['KM/H 5O', 'AGL 68', 'ASL 3OO', 'AGL 6', 'AGL 6']))
+    reader.read(cluster_image('50', '68', '300'), None, 0.0)
+    # (within 2 s the rate limit already refuses a 62 m drop; after a gap of readings it did not)
+    once = reader.read(cluster_image('50', '6', '300'), None, 3.0)
+    assert once.agl_m is None                                 # one frame of '6': not believed yet
+    twice = reader.read(cluster_image('50', '6', '300'), None, 3.1)
+    assert twice.agl_m == 6                                   # read twice: it is real (a cliff edge)

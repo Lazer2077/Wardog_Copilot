@@ -196,12 +196,13 @@ def test_lands_after_a_lateral_miss():
     assert math.hypot(w.body.x - goal[0], w.body.y - goal[1]) * m < 60
 
 
-def _return_mid_cruise(jhook, align=math.inf, hills=0.0):
+def _return_mid_cruise(jhook, align=math.inf, hills=0.0, vector=True):
     """Cruise away from home, press return: time until the helicopter really heads home."""
     from wardog_ad.geometry import bearing, heading_vector
     logging.disable(logging.WARNING)
     assets, cfg, w, pilot = _setup(hills=hills)
     cfg.aircraft.jhook = jhook
+    cfg.aircraft.vector_guidance = vector
     w.heli_align, pilot.airnav.align = align, align
     assert pilot.go()
     _run(cfg, w, pilot, lambda: False, 45)
@@ -337,9 +338,10 @@ def test_flatter_spot_from_terrain_memory():
     assert math.hypot(spot[0] + 12, spot[1] - 4) <= 40
 
 
-def _time_from(distance_m, hills=0.0, align=math.inf, yaw=1.0):
+def _time_from(distance_m, hills=0.0, align=math.inf, yaw=1.0, vector=True):
     logging.disable(logging.WARNING)
     assets, cfg, w, pilot = _setup(hills=hills)
+    cfg.aircraft.vector_guidance = vector       # the option under test (off by default since 17:00)
     w.heli_align = pilot.airnav.align = align
     w.heli_yaw_scale = yaw
     m = assets.meters_per_pixel
@@ -356,6 +358,13 @@ def _time_from(distance_m, hills=0.0, align=math.inf, yaw=1.0):
     w.pilot_spot = spot
     miss = math.hypot(w.body.x - spot[0], w.body.y - spot[1]) * m
     return w.time - started[0], miss, statuses, w
+
+
+def test_default_guidance_lands_as_before():
+    """Default (nose-pointing) guidance, arcade sim: as before the vector-guidance trial."""
+    seconds, miss, statuses, w = _time_from(1500, 0.0, math.inf, 1.0, vector=False)
+    assert 'j-hook' in {s for _, s, _ in statuses}
+    assert seconds < 56 and miss < 40 and w.crashes == 0 and w.hard_landings == 0
 
 
 @pytest.mark.parametrize('hills, align, yaw', [(0.0, .02, 1.0), (60.0, .02, .3), (60.0, .02, 1.0)])

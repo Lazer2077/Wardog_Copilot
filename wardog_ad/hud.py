@@ -136,6 +136,18 @@ def parse_number(text: str, label: str | None = None) -> str | None:
     return m.group(0) if m else None
 
 
+def mask_for_ocr(img: np.ndarray, height: int = 60) -> np.ndarray:
+    """The HUD digits as black text on white, scaled to ~``height`` px, padded: what OCR reads best."""
+    mask = text_mask(img)
+    ys, xs = np.nonzero(mask)
+    if len(xs):
+        mask = mask[max(0, ys.min() - 1):ys.max() + 2, max(0, xs.min() - 1):xs.max() + 2]
+    scale = height / max(1, mask.shape[0])
+    big = cv2.resize((1 - mask) * 255, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST).astype(np.uint8)
+    big = cv2.copyMakeBorder(big, 20, 20, 30, 30, cv2.BORDER_CONSTANT, value=255)
+    return cv2.cvtColor(big, cv2.COLOR_GRAY2BGR)
+
+
 # --------------------------------------------------------------------------- glyphs
 def text_mask(img: np.ndarray) -> np.ndarray:
     """Binary mask of the light, unsaturated HUD text."""
@@ -151,7 +163,9 @@ def glyphs(img: np.ndarray) -> list[np.ndarray]:
     mask = text_mask(img)
     n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
     h = img.shape[0]
-    boxes = [stats[i, :4] for i in range(1, n) if stats[i, 3] >= .35 * h and stats[i, 4] >= 6]
+    # join the parts of a glyph first, THEN drop small specks: at 1080p the top bar of a '5'
+    # comes apart from its body and was thrown away on its own ('53' read as '3')
+    boxes = [stats[i, :4] for i in range(1, n) if stats[i, 4] >= 3]
     boxes.sort(key=lambda b: b[0])
     merged = []
     for x, y, w, hh in boxes:   # parts of one glyph overlap horizontally
@@ -163,6 +177,8 @@ def glyphs(img: np.ndarray) -> list[np.ndarray]:
             merged.append([x, y, w, hh])
     out = []
     for x, y, w, hh in merged:
+        if hh < .35 * h or int(mask[y:y + hh, x:x + w].sum()) < 6:
+            continue                      # a speck, not a digit
         g = mask[y:y + hh, x:x + w].astype(np.float32)
         side = max(w, int(hh * GLYPH_SIZE[0] / GLYPH_SIZE[1]))   # keep '1' thin
         canvas = np.zeros((hh, side), np.float32)
@@ -321,6 +337,13 @@ class HudReader:
         if text is None:
             self.ocr_calls += 1
             text = parse_number(self.ocr(glue(label_box.crop(cluster), value_img)), self.LABELS[name])
+            if text is None or len(text) != len(imgs):
+                # OCR the clean digit mask (black on white, enlarged): at 1080p the digits are
+                # ~8 px and the raw crop over trees was misread (48 -> 3, 366 -> 30)
+                self.ocr_calls += 1
+                text = parse_number(self.ocr(mask_for_ocr(value_img)))
+                if text is not None and len(text) != len(imgs):
+                    text = None           # OCR and the segmentation disagree on the digit count
             if text is not None:
                 self.library.learn(text, imgs)
         try:
@@ -377,5 +400,13 @@ class HudReader:
             dt = max(0.05, now - previous[1])
             if abs(value - previous[0]) > max_rate * dt + 3 and now - previous[1] < 2.0:
                 return None
+            if name in ('agl', 'asl') and abs(value - previous[0]) > 25 and now - previous[1] < 10.0:
+                # a big height jump must be read twice in a row (a cliff, or a garbled digit:
+                # AGL 68 -> 6 -> 65 at 16:43, each '6' a pull-up)
+                candidate = self.last.get(name + '_candidate')
+                if candidate is None or abs(candidate[0] - value) > 5 or now - candidate[1] > 1.0:
+                    self.last[name + '_candidate'] = (value, now)
+                    return None
+        self.last.pop(name + '_candidate', None)
         self.last[name] = (value, now)
         return value
