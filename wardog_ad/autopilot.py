@@ -110,6 +110,8 @@ class Autopilot:
         self.home: tuple | None = tuple(home) if home else None
         self.via: list = []             # waypoints of the outbound leg (flown reversed on return)
         self._capture_home = False
+        self._boarded = False           # home taken from where we got in (helicopter, on the ground)
+        self._flown = False             # airborne since then: a later touchdown is not a boarding
         self.foreground_ok = True
         self.last_valid = -1e9
         self.speed_mismatches = 0
@@ -148,6 +150,7 @@ class Autopilot:
             self.waypoints, self.via, self.avoid = [], [], []
             self.mission, self.arrived = 'idle', False
             self._capture_home = self._needs_plan = False
+            self._boarded = self._flown = False
             dest, home = self.cfg.destinations.get(assets.map_id), self.cfg.homes.get(assets.map_id)
             self.destination = tuple(dest) if dest else None
             self.home = tuple(home) if home else None
@@ -418,6 +421,7 @@ class Autopilot:
                 self.controller.terrain = self.terrain_memory()
                 self.controller.open_ground = self.open_ground   # asked when the final approach starts
                 self.controller.velocity = self._velocity
+                self.controller.compass_fresh = lambda now: now - self.airnav.last_compass_t < 2.0
             self._needs_plan = False
         else:
             t = self.cfg.truck
@@ -452,8 +456,15 @@ class Autopilot:
             return self.engaged
 
     def return_home(self):
-        """Drive back to the home point."""
+        """Drive back to the home point.  Pressed again while returning: cancel the return
+        (it could not be stopped before - F8 only paused it and the next F8 resumed it)."""
         with self.lock:
+            if self.mission == 'return' and self.engaged:
+                self.disengage('return cancelled - your controls')
+                self.mission, self.goal = 'idle', None
+                self.telemetry.route = []
+                log.warning('RETURN cancelled')
+                return False
             if self.home is None:
                 self.telemetry.message = 'no home yet: press go once (or set-home) first'
                 log.warning(self.telemetry.message)
@@ -480,6 +491,7 @@ class Autopilot:
                 self.controller.terrain = self.terrain_memory()
             self.controller.open_ground = self.open_ground
             self.controller.velocity = self._velocity
+            self.controller.compass_fresh = lambda now: now - self.airnav.last_compass_t < 2.0
             # land close to where the key was pressed (when the position is known)
             self.controller.land_now(here if st is not None else None)
             self._needs_plan = False
@@ -497,8 +509,9 @@ class Autopilot:
                 self.disengage('start cancelled')
             elif self.engaged:
                 self.disengage('paused')
-            elif (self.mission in ('outbound','return') or
+            elif (self.mission == 'outbound' or
                   (self.cfg.profile == 'aircraft' and self.mission == 'land')) and not self.arrived and self.goal is not None:
+                # (a paused RETURN is resumed with the return key; F8 goes to the destination)
                 self.countermeasures_on = True
                 self.engage()
             elif self.mission == 'outbound' and self.arrived and self.goal == self.destination:
@@ -682,6 +695,14 @@ class Autopilot:
         tel.state = state
         if state is not None:
             self.last_speed = state.speed_ms
+            if hud is not None and hud.agl_m is not None and hud.agl_m > 10:
+                self._flown = True
+            if (not self._boarded and not self._flown and hud is not None and hud.agl_m is not None
+                    and hud.agl_m <= cfg.aircraft.ground_agl_m and nav.source.startswith('fix')):
+                # in the helicopter, on the ground, position from the minimap: home is HERE.
+                # No set-home needed (an old saved home sent the 23:28 return 3.7 km away).
+                self.home, self._boarded, self._capture_home = state.position, True, False
+                log.warning('home = boarding spot %s', tuple(round(c) for c in self.home))
             if self._capture_home:
                 self.home, self._capture_home = state.position, False
                 log.warning('home remembered at %s', tuple(round(c) for c in self.home))
@@ -961,6 +982,7 @@ class Autopilot:
             self.airnav.reset()
             self.manual_position = None
             self._needs_plan = self.controller is not None
+            self._boarded = self._flown = False   # new round / respawn: home = the next boarding spot
             log.warning('HUD back after %.0fs: re-localizing', now - self.last_hud)
         if visible or self._hud_grace:
             self.last_hud = now

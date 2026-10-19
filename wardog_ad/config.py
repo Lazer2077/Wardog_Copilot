@@ -121,7 +121,7 @@ class AircraftTuning:
     rising_ground_m: float = 10.0       # look-ahead: only ground this much above the ground here counts
     lookahead_s: float = 20.0           # terrain memory: look this far ahead (time at current speed) ...
     lookahead_min_m: float = 600.0      # ... but at least this far
-    lookahead_clear_frac: float = 0.8   # pass known high ground with 80 % of the cruise height
+    lookahead_clear_frac: float = 0.8   # pass known high ground with 80 % of the cruise height (0.65 dipped to 3 m on a known ridge)
     decel_ms2: float = 3.0              # planned braking (players dump 270 -> 50 km/h nose-up)
     # landing at the destination / return point
     auto_land: bool = True              # False: hover at the destination and hand over
@@ -137,6 +137,11 @@ class AircraftTuning:
     # helicopter barely turns its motion with the nose (fit-slip on 13:16: 0.02/s)
     vector_guidance: bool = False       # off: at 17:00 the compass was unreadable most of the time, the
                                         # nose heading wrong, and it circled worse than the old steering
+    vector_landing: bool = True         # ... but use it for the final approach and landing: in the measured
+                                        # sliding physics the default steering cannot land (sim: circles 340 s)
+    vector_landing_m: float = 1500.0    # from this far out
+    vector_turnround: bool = True       # turning round at speed (F7 while flying away) with it too
+    vg_pivot_kmh: float = 45.0          # turning round: start the 180 deg pivot below this speed
     vg_gain: float = 0.5                # 1/s: velocity error -> acceleration
     vg_decel_ms2: float = 3.5           # braking curve onto the landing point
     vg_dead_ms2: float = 0.3            # smaller accelerations: hold the nose where it is
@@ -148,6 +153,7 @@ class AircraftTuning:
     hook_max_kmh: float = 360.0         # a faster speed reading is a misread: never start a hook on it
     hook_lag_s: float = 1.0             # plan the stop this many seconds of flight early (response lag)
     hook_kmh_per_tick: float = 20.0     # nose-up braking allowed in the hook: 1 tick per 20 km/h
+    hook_kv: float = 0.05               # ticks nose-up per km/h above the hook's braking curve
     land_here_radius_m: float = 150.0   # F10: touch down within this of where the key was pressed
     land_hover_agl_m: float = 15.0      # over the landing area: hover this low before the final descent
     land_fast_vz: float = 10.0          # sink rate allowed while still above 40 m over the landing area

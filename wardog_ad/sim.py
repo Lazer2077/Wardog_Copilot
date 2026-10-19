@@ -102,6 +102,7 @@ class SimWorld:
     heli_align: float = math.inf       # (fit-slip on 13:16 suggested 0.02 = sliding; tests choose it explicitly)
     hud_drops_hundreds: bool = False   # HUD reader bug seen at 10:56: 100-199 km/h read without the '1'
     hud_speed_glitch: float = 0.0      # chance per reading of a garbled speed (534 km/h at 12:54)
+    heli_drag: float = 8.2e-4          # 1/m; the game braked weaker in the 23:28 J-hook (~6e-4)
     compass_dropout: float = 0.0       # chance per reading that the compass is unreadable (1080p: 86%)
     compass_garbage: float = 0.0       # chance per reading of a wrong compass value
     hard_landings: int = 0
@@ -194,8 +195,8 @@ class SimWorld:
             # g*tan(pitch) - drag; drag calibrated so ~3 ticks (30 deg) holds ~300 km/h
             # (player cruise) and the measured weak response at small pitch is kept
             v = math.hypot(b.speed, b.side)
-            b.speed += (9.81 * math.tan(math.radians(b.pitch)) - 8.2e-4 * b.speed * v) * dt
-            b.side -= 8.2e-4 * b.side * v * dt
+            b.speed += (9.81 * math.tan(math.radians(b.pitch)) - self.heli_drag * b.speed * v) * dt
+            b.side -= self.heli_drag * b.side * v * dt
         b.speed = float(np.clip(b.speed, -25.0, 97.0))     # 350 km/h top speed
         yaw = (k.yaw_right in keys) - (k.yaw_left in keys)
         max_rate = (45.0 if abs(b.speed) < 15 else 30.0) * self.heli_yaw_scale

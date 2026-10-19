@@ -245,6 +245,7 @@ def test_navigator_follows_a_slide_without_fixes():
     assets, cfg, w, pilot = _setup(hills=0.0)
     w.heli_align = pilot.airnav.align = 0.02            # the measured slide
     cfg.aircraft.vector_guidance = False                # nose-pointing: a big sideslip to follow
+    cfg.aircraft.vector_turnround = cfg.aircraft.vector_landing = False
     assert pilot.go()
     _run(cfg, w, pilot, lambda: False, 45)
     m = assets.meters_per_pixel
@@ -270,6 +271,7 @@ def test_fit_slip_measures_the_slide_from_a_flight_log(tmp_path):
     assets, cfg, w, pilot = _setup(hills=0.0)
     w.heli_align = 0.5
     cfg.aircraft.vector_guidance = False      # nose-pointing makes the sharp turns the fit needs
+    cfg.aircraft.vector_turnround = cfg.aircraft.vector_landing = False
     rec = FlightRecorder(tmp_path)
     nxt = w.time
 
@@ -342,6 +344,8 @@ def _time_from(distance_m, hills=0.0, align=math.inf, yaw=1.0, vector=True):
     logging.disable(logging.WARNING)
     assets, cfg, w, pilot = _setup(hills=hills)
     cfg.aircraft.vector_guidance = vector       # the option under test (off by default since 17:00)
+    if not vector:                              # the old nose-pointing guidance throughout
+        cfg.aircraft.vector_turnround = cfg.aircraft.vector_landing = False
     w.heli_align = pilot.airnav.align = align
     w.heli_yaw_scale = yaw
     m = assets.meters_per_pixel
@@ -479,3 +483,74 @@ def test_destination_in_the_trees_lands_in_the_nearest_open_ground():
     assert math.hypot(spot[0] - goal[0], spot[1] - goal[1]) * m <= cfg.aircraft.open_radius_m + cfg.aircraft.spot_shift_m
     assert math.hypot(w.body.x - spot[0], w.body.y - spot[1]) * m < 40
     assert w.crashes == 0 and w.hard_landings == 0
+
+
+def test_high_above_cruise_height_it_still_speeds_up():
+    """23:12: at 250-350 m (cruise height 150) it descended and the 'sinking: keep the nose
+    gentle' rule held the nose to 0.4 tick - ~200 km/h for minutes.  That rule is for low."""
+    logging.disable(logging.WARNING)
+    assets, cfg, w, pilot = _setup(hills=0.0)
+    w.body.alt, w.body.speed, w.body.pitch = 300.0, 150 / 3.6, 10.0
+    assert pilot.go()
+    start, hit = w.time, []
+
+    def until():
+        if not hit and w.body.speed * 3.6 > 280:
+            hit.append(w.time - start)
+        return bool(hit) or w.time - start > 60
+    _run(cfg, w, pilot, until, 61)
+    logging.disable(logging.NOTSET)
+    assert hit and hit[0] < 35 and w.crashes == 0          # old rule: ~53 s
+
+
+def test_home_is_where_you_board_not_an_old_saved_one():
+    logging.disable(logging.WARNING)
+    assets, cfg, w, pilot = _setup(hills=0.0)
+    pilot.home = (50.0, 50.0)                                 # an old saved home (config homes)
+    _run(cfg, w, pilot, lambda: False, 2)                     # sitting in the helicopter, on the ground
+    logging.disable(logging.NOTSET)
+    assert math.hypot(pilot.home[0] - START[0], pilot.home[1] - START[1]) < 3
+
+
+def test_return_can_be_cancelled_and_f8_then_flies_to_the_destination():
+    logging.disable(logging.WARNING)
+    assets, cfg, w, pilot = _setup(hills=0.0)
+    assert pilot.go()
+    _run(cfg, w, pilot, lambda: False, 40)
+    assert pilot.return_home() and pilot.mission == 'return'
+    _run(cfg, w, pilot, lambda: False, 5)
+    assert pilot.return_home() is False                       # pressed again: cancelled
+    assert not pilot.engaged and pilot.mission == 'idle' and not pilot.keyboard.down
+    pilot.toggle()                                            # F8: to the destination, not back home
+    logging.disable(logging.NOTSET)
+    assert pilot.engaged and pilot.mission == 'outbound'
+
+
+def test_turning_round_in_the_measured_sliding_physics_does_not_drift():
+    """F7 while cruising away at ~320 km/h.  The old yaw-first turn-back drifted ~470 m
+    sideways (the motion keeps going while the nose swings); now: brake straight nose-up,
+    pivot during the last 45 km/h, accelerate home."""
+    from wardog_ad.geometry import heading_vector, bearing
+    import numpy as np
+    logging.disable(logging.WARNING)
+    assets, cfg, w, pilot = _setup(hills=0.0)
+    w.heli_align, w.heli_drag, w.compass_dropout = 0.02, 6e-4, 0.3
+    m = assets.meters_per_pixel
+    assert pilot.go()
+    _run(cfg, w, pilot, lambda: False, 45)
+    p0 = np.array([w.body.x, w.body.y])
+    home = heading_vector(bearing(tuple(p0), START))
+    side = np.array([-home[1], home[0]])
+    start, drift, home_at = w.time, [0.0], []
+    assert pilot.return_home()
+
+    def until():
+        d = np.array([w.body.x, w.body.y]) - p0
+        drift[0] = max(drift[0], abs(float(d @ side)) * m)
+        v = heading_vector(w.body.heading) * w.body.speed + heading_vector(w.body.heading + 90) * w.body.side
+        if not home_at and float(v @ home) * 3.6 > 150:
+            home_at.append(w.time - start)
+        return bool(home_at)
+    _run(cfg, w, pilot, until, 60)
+    logging.disable(logging.NOTSET)
+    assert home_at and home_at[0] < 30 and drift[0] < 100 and w.crashes == 0

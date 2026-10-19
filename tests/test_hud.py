@@ -88,6 +88,8 @@ def test_helicopter_sim_flight(auto_level, pitch_rate, loop_hz):
     from wardog_ad.sim import run_sim
     cfg = Config(profile='aircraft')
     cfg.loop_hz = loop_hz
+    # the plant fit is about the basic nose-pointing loops (vector guidance assumes the 10 Hz loop)
+    cfg.aircraft.vector_turnround = cfg.aircraft.vector_landing = False
     res = run_sim(cfg, load_map('ozeti'), (300, 1200), (1300, 300), heading=200, waypoints=[(800, 1100)],
                   max_time=500, world_options=dict(heli_auto_level=auto_level, heli_pitch_rate=pitch_rate))
     assert res.arrived and res.crashes == 0 and res.distance_to_goal_m < cfg.aircraft.hover_radius_m

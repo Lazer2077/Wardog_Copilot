@@ -320,6 +320,9 @@ class HeliPilot:
         self.open_ground = None          # OpenGround from the base map (set by the autopilot)
         self.velocity = None             # callable(now) -> measured ground velocity m/s (map x, y)
         self._vel_now = None
+        self._vg_on = False
+        self._turning = False
+        self.compass_fresh = None        # callable(now) -> compass read recently (set by the autopilot)
         self.takeoff_ground = None       # ground height (m ASL) where we lifted off
         self.set_waypoints(waypoints)
 
@@ -485,7 +488,7 @@ class HeliPilot:
         v = abs(spd) / 3.6
         course = nav['course'] if nav['speed_ms'] >= -1.0 else (nav['heading'] + 180) % 360
         err_v, err_n = angle_delta(course, nav['bearing']), nav['nose_error']
-        if t.vector_guidance and self._vel_now is not None:
+        if self._vg_on:
             return None                   # the vector guidance turns round by itself (faster: 30 s vs 37 s)
         if self.jhook is None:
             if not (t.jhook and abs(err_v) > t.jhook_trigger_deg and abs(spd) > t.jhook_min_kmh
@@ -562,6 +565,13 @@ class HeliPilot:
         # speeding up towards where we want to go: the nose faces the thrust (turn round,
         # never fly backwards - it did, at 40 km/h, the whole way in the first try)
         forward = abs(e_fwd) <= abs(e_back) if braking or v_want < 3 else True
+        reversing = v_want > 12 and abs(angle_delta(math.degrees(math.atan2(vel[0], -vel[1])) % 360,
+                                                    nav['bearing'])) > 120
+        if braking and reversing and speed < t.vg_pivot_kmh / 3.6:
+            # turning round: start the 180 deg pivot while the last of the speed is braked off
+            # (a pivot takes ~4 s; stopping first and then pivoting wasted that time)
+            forward = True
+        info['reversing'] = reversing
         err = e_fwd if forward else e_back
         # thrust only once the nose is (nearly) where it should be: full thrust 38 deg off the
         # wanted direction is exactly the centripetal force of an orbit round the point
@@ -654,6 +664,32 @@ class HeliPilot:
         self._vel_now = self.velocity(now) if callable(self.velocity) and nav is not None else None
         error = nav['error'] if nav else 0.0
         dist = nav['dist_m'] if nav else None
+        # velocity-vector guidance: everywhere (vector_guidance), or only for the final approach
+        # and landing (vector_landing) - and only on a measured velocity and a compass read in
+        # the last 2 s (17:00: unreadable compass at 1080p, the nose estimate jumped -> circling)
+        in_zone = nav is not None and (self.landing is not None or (
+            nav['last'] and (t.auto_land or self.land_here) and dist < t.vector_landing_m))
+        if (nav is not None and self._vel_now is not None and t.vector_turnround
+                and float(np.hypot(*self._vel_now)) * 3.6 > t.jhook_min_kmh):
+            course_now = math.degrees(math.atan2(self._vel_now[0], -self._vel_now[1])) % 360
+            if abs(angle_delta(course_now, nav['bearing'])) > t.jhook_trigger_deg:
+                self._turning = True
+                # the target is behind the way we are going (F7 while flying away): turn round
+                # with the vector guidance - brake straight, then pivot; the old yaw-first
+                # turn-back drifted 470 m sideways in the measured sliding physics
+                in_zone = True
+        if self._turning and nav is not None and self._vel_now is not None:
+            # stay on it until we are really flying home - handing back mid-turn to the old
+            # steering cost 8 s and 250 m of drift in the simulation
+            v = float(np.hypot(*self._vel_now)) * 3.6
+            course_now = math.degrees(math.atan2(self._vel_now[0], -self._vel_now[1])) % 360
+            if abs(angle_delta(course_now, nav['bearing'])) < 25 and v > 120:
+                self._turning = False
+            else:
+                in_zone = True
+        compass_ok = self.compass_fresh(now) if callable(self.compass_fresh) else True
+        self._vg_on = (self._vel_now is not None and compass_ok
+                       and (t.vector_guidance or (t.vector_landing and in_zone)))
         info = dict(heading_error=error, agl=agl, speed_kmh=spd, vz=self.vz, vz_pred=vz_pred,
                     terrain_rate=self.terrain_rate, pitch=hud.pitch, lever=hud.collective)
         if nav:
@@ -740,7 +776,9 @@ class HeliPilot:
             drag = 9.81 * math.tan(math.radians(10 * t.ref_pitch_ticks)) / (t.ref_speed_kmh / 3.6) ** 2
             a_need = -v * v / (2 * max(room, 5.0))
             thrust = a_need + drag * v * v
-            self._hook_pitch = math.degrees(math.atan(thrust / 9.81)) / 10 + t.spd_to_pitch * (v_target - spd)
+            # + strong feedback on the real speed: the model expected 4.9 m/s^2 from drag at
+            # 280 km/h, the game gave ~2.6 (23:28) - the hook fell behind and overshot
+            self._hook_pitch = math.degrees(math.atan(thrust / 9.81)) / 10 + t.hook_kv * (v_target - spd)
             # never more nose-down than it takes to hold the present speed against drag
             hold = math.degrees(math.atan(drag * v * v / 9.81)) / 10
             self._hook_pitch = min(self._hook_pitch, hold)
@@ -845,7 +883,7 @@ class HeliPilot:
                     v_target = min(v_target, 3.6 * math.sqrt(2 * t.decel_ms2 * stop))
                     if v_target < t.cruise_kmh:
                         mode = 'approach'
-                if abs(error) > t.turn_slow_deg and not (t.vector_guidance and self._vel_now is not None):
+                if abs(error) > t.turn_slow_deg and not self._vg_on:
                     v_target = min(v_target, t.turn_kmh)
                 v_target *= max(t.low_speed_frac, margin)          # climb before going fast
                 # rising ground: the ground rises at slope x speed.  While we are low, fly
@@ -879,7 +917,7 @@ class HeliPilot:
         if move_to_target and nav is not None:
             # creep towards the landing point when facing it (pitch makes the helicopter move)
             cap = t.creep_kmh if dist < t.hover_radius_m or self.landing != 'hover' else t.reposition_kmh
-            vectored = t.vector_guidance and self._vel_now is not None
+            vectored = self._vg_on
             v_target = min(cap, .5 * max(0.0, dist - (2 if vectored else 5))) if abs(error) < 30 or vectored else 0.0
             near = self.land_here and not self.spot_moved and dist < .7 * t.land_here_radius_m
             if near or (self.landing in ('descend', 'flare') and agl < 10):
@@ -930,8 +968,12 @@ class HeliPilot:
         # zero would start flying backwards (seen in simulation with the unsigned HUD speed)
         back = min(back, max(0.0, spd) / t.brake_kmh_per_tick)
         fwd = min(fwd, max(.15, fwd if spd >= 0 else .15 + max(0.0, -spd) / t.brake_kmh_per_tick))
-        if vz_pred < -4.0:               # sinking: nose-down costs lift, keep it gentle
-            fwd = min(fwd, .4)           # (braking nose-up is still allowed: it helps arrest the sink)
+        # sinking LOW: nose-down costs lift, keep it gentle (braking nose-up is still allowed).
+        # Up high it does not matter - at 250-350 m it held 229 of 407 cruise ticks to 0.4 tick
+        # while descending to cruise height (23:12: ~200 km/h instead of 300)
+        sinking_low_alt = vz_pred < -4.0 and agl < .6 * t.cruise_agl_m
+        if sinking_low_alt:
+            fwd = min(fwd, .4)
         if self.landing in ('jhook', 'hover', 'descend', 'flare'):
             # stopping for a landing: brake as hard as players do (270 -> 50 km/h in seconds), and
             # keep a full tick of authority down to ~12 km/h so the last bit does not creep on
@@ -946,12 +988,12 @@ class HeliPilot:
         pitch_target = max(-back, min(fwd, pitch_target))
         if hook is not None and not pull_up:
             pitch_target = hook[0]          # full authority both ways: steering the velocity vector
-            if vz_pred < -4.0:
+            if sinking_low_alt:
                 pitch_target = min(pitch_target, .4)
         if self.landing == 'jhook':
             pitch_target = max(-back, min(fwd, self._hook_pitch))
         vector = None
-        if (t.vector_guidance and nav is not None and self.airborne
+        if (self._vg_on and nav is not None and self.airborne
                 and (moving_low or agl >= min(t.turn_agl_m, 8.0 if self.landing else t.turn_agl_m))):
             last_leg = nav['last'] and (t.auto_land or self.land_here)
             stop_m = None
@@ -962,11 +1004,14 @@ class HeliPilot:
             v_pitch, v_err, v_info = vector
             info.update(v_info)
             # nose-up may now brake fully at any forward/backward speed: the velocity is measured
-            up = t.brake_pitch_max if (self.landing in ('jhook', 'hover') or pull_up) else t.pitch_back_max
+            # braking hard is safe high up: the full nose-up authority whenever we are braking
+            # for a landing, a pull-up or a turn round (2.5 -> 3.2 ticks)
+            hard = self.landing in ('jhook', 'hover') or pull_up or (v_info.get('reversing') and agl > 20)
+            up = t.brake_pitch_max if hard else t.pitch_back_max
             down = t.pitch_fwd_max * (.3 + .7 * margin)
             if self.landing in ('descend', 'flare') or agl < 8:
                 up, down = min(up, 1.0), min(down, .4)
-            if vz_pred < -4.0:
+            if sinking_low_alt:
                 down = min(down, .4)
             if pull_up:
                 down = 0.0
@@ -992,7 +1037,7 @@ class HeliPilot:
 
         # ------------------------------------------------ heading
         near = 20.0 if self.landing in ('descend', 'flare') else 8.0     # going down: hold the heading
-        if t.vector_guidance and self._vel_now is not None:
+        if self._vg_on:
             near = 5.0                    # the thrust can be pointed anywhere: keep centring
         if not yaw_ok or nav is None or (move_to_target and dist is not None and dist < near):
             yaw = 0.0
