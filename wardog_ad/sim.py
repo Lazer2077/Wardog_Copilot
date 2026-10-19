@@ -191,6 +191,7 @@ class SimWorld:
             b.alt, b.vz, b.asl = 0.0, max(0.0, b.vz), ground
         if b.alt < 0.5:
             b.speed *= max(0.0, 1 - 3 * dt)                       # skids on the ground
+            b.side *= max(0.0, 1 - 3 * dt)                        # (sideways too: it slid on for ever)
         else:
             # g*tan(pitch) - drag; drag calibrated so ~3 ticks (30 deg) holds ~300 km/h
             # (player cruise) and the measured weak response at small pitch is kept

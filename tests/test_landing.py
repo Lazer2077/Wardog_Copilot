@@ -365,10 +365,11 @@ def _time_from(distance_m, hills=0.0, align=math.inf, yaw=1.0, vector=True):
 
 
 def test_default_guidance_lands_as_before():
-    """Default (nose-pointing) guidance, arcade sim: as before the vector-guidance trial."""
+    """Default (nose-pointing) guidance, arcade sim: as before the vector-guidance trial, but
+    it now re-centres before setting down (was 48 s and 20 m off, now ~57 s and ~5 m)."""
     seconds, miss, statuses, w = _time_from(1500, 0.0, math.inf, 1.0, vector=False)
     assert 'j-hook' in {s for _, s, _ in statuses}
-    assert seconds < 56 and miss < 40 and w.crashes == 0 and w.hard_landings == 0
+    assert seconds < 60 and miss < 10 and w.crashes == 0 and w.hard_landings == 0
 
 
 @pytest.mark.parametrize('hills, align, yaw', [(0.0, .02, 1.0), (60.0, .02, .3), (60.0, .02, 1.0)])
@@ -554,3 +555,42 @@ def test_turning_round_in_the_measured_sliding_physics_does_not_drift():
     _run(cfg, w, pilot, until, 60)
     logging.disable(logging.NOTSET)
     assert home_at and home_at[0] < 30 and drift[0] < 100 and w.crashes == 0
+
+
+class _NoisyLocator:
+    """Minimap fixes as the game gives them: metres of scatter and a few frames late."""
+
+    def __init__(self, world, noise_px, latency_s, seed=0):
+        import random
+        from collections import deque
+        self.w, self.noise, self.latency = world, noise_px, latency_s
+        self.rng, self.history = random.Random(seed), deque()
+
+    def locate(self, image, anchor, north_up):
+        from wardog_ad.localization import Fix
+        b, now = self.w.body, self.w.time
+        self.history.append((now, b.x, b.y, b.heading))
+        while now - self.history[0][0] > 2.0:
+            self.history.popleft()
+        t, x, y, heading = next(p for p in self.history if p[0] >= now - self.latency)
+        return Fix(x + self.rng.gauss(0, self.noise), y + self.rng.gauss(0, self.noise),
+                   (heading + self.rng.gauss(0, 3)) % 360, 1.0, 50, .5, .5, 0.0, True, 'noisy', t)
+
+
+@pytest.mark.parametrize('world_align', [0.02, math.inf])
+def test_lands_on_the_point_with_noisy_late_fixes(world_align):
+    """~13 m fix scatter, 0.3 s late, navigator left at the default (arcade) slide setting.
+    A line through the raw fixes 'measured' 25-205 km/h at a 9 km/h hover: the old landing
+    never settled (600 s).  The fused velocity lands within a few metres of the point
+    (sim: median ~4 m)."""
+    logging.disable(logging.WARNING)
+    assets, cfg, w, pilot = _setup()
+    w.heli_align, w.heli_drag, w.compass_dropout = world_align, 6e-4, 0.3
+    pilot.locator = _NoisyLocator(w, 2.5, 0.3)
+    assert pilot.go()
+    assert _run(cfg, w, pilot, lambda: pilot.arrived and not pilot.engaged, 400)
+    logging.disable(logging.NOTSET)
+    spot = pilot.controller.waypoints[-1]
+    miss = math.hypot(w.body.x - spot[0], w.body.y - spot[1]) * assets.meters_per_pixel
+    assert miss < 20 and w.crashes == 0 and w.hard_landings == 0          # 8 seeds: 1-16 m
+    assert pilot.airnav.sliding == (not math.isinf(world_align))     # the fixes found the physics

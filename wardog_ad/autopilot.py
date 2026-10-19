@@ -359,9 +359,9 @@ class Autopilot:
         return self._terrain
 
     def _velocity(self, now):
-        """Measured ground velocity (minimap fixes); without fixes the slide model's estimate."""
-        v = self.airnav.ground_velocity(now)
-        return v if v is not None else self.airnav.velocity_estimate()
+        """Ground velocity fused from the minimap fixes, HUD speed and compass; without recent
+        fixes the slide model's estimate."""
+        return self.airnav.velocity(now)
 
     def open_ground(self):
         """Open-ground cost map of this map (built once per map from the base image, ~0.5 s).
@@ -422,6 +422,7 @@ class Autopilot:
                 self.controller.open_ground = self.open_ground   # asked when the final approach starts
                 self.controller.velocity = self._velocity
                 self.controller.compass_fresh = lambda now: now - self.airnav.last_compass_t < 2.0
+                self.controller.sliding = lambda: self.airnav.sliding
             self._needs_plan = False
         else:
             t = self.cfg.truck
@@ -492,6 +493,7 @@ class Autopilot:
             self.controller.open_ground = self.open_ground
             self.controller.velocity = self._velocity
             self.controller.compass_fresh = lambda now: now - self.airnav.last_compass_t < 2.0
+            self.controller.sliding = lambda: self.airnav.sliding
             # land close to where the key was pressed (when the position is known)
             self.controller.land_now(here if st is not None else None)
             self._needs_plan = False
@@ -753,31 +755,43 @@ class Autopilot:
         """Replace a HUD speed that disagrees with the ground speed from the minimap fixes."""
         if hud is None:
             return None
-        ground = self.airnav.ground_speed(now) if self.airnav.initialized else None
-        if ground is not None:
-            self._last_ground = (ground, now)
-        elif self._last_ground is not None and now - self._last_ground[1] < 1.5:
-            ground = self._last_ground[0]     # a thin moment between fixes: the last one still holds
+        fit = self.airnav.ground_speed_fit(now) if self.airnav.initialized else None
+        if fit is not None:
+            self._last_ground = (*fit, now)
+        elif self._last_ground is not None and now - self._last_ground[2] < 1.5:
+            fit = self._last_ground[:2]       # a thin moment between fixes: the last one still holds
         self.telemetry.speed_source = 'hud'
-        if ground is None:
+        if fit is None:
             return hud
+        ground, se = fit
+        if 3 * se > max(self.cfg.aircraft.speed_check_kmh, .5 * ground):
+            return hud     # too noisy to judge: a 13 m fix scatter 'measured' 25-205 km/h at a 9 km/h hover
         hud_speed = hud.speed_kmh
-        if hud_speed is not None and abs(hud_speed - ground) <= max(self.cfg.aircraft.speed_check_kmh, .2 * ground):
+        tolerance = max(self.cfg.aircraft.speed_check_kmh, .2 * ground, 3 * se)
+        fixed = ground
+        if hud_speed is not None and abs(hud_speed - ground) <= tolerance:
             return hud
+        if hud_speed is not None and hud_speed < ground:
+            # too low: only the lost hundreds digit (167 read as 67) is believed - the track's
+            # own error is larger at times (293 km/h 'measured' at 161 with 13 m fixes; 41 at a
+            # 2 km/h hover threw a landing 38 m off), and the digits are exact once restored
+            if abs(hud_speed + 100 - ground) > tolerance:
+                return hud
+            fixed = hud_speed + 100
         from dataclasses import replace
         self.telemetry.speed_source = 'fixes'
         self.speed_mismatches += 1
         if now - self._last_mismatch_log > 5.0:
             self._last_mismatch_log = now
-            log.warning('HUD speed %s km/h but the minimap track says %.0f km/h: using the track',
-                        hud_speed, ground)
+            log.warning('HUD speed %s km/h but the minimap track says %.0f km/h: using %.0f',
+                        hud_speed, ground, fixed)
             save = getattr(self.sensors, 'save_hud_crop', None)
             if save is not None:
                 try:
                     save(f'spd{hud_speed}_true{ground:.0f}')
                 except Exception:
                     log.exception('could not save the HUD crop')
-        return replace(hud, speed_kmh=float(round(ground)))
+        return replace(hud, speed_kmh=float(round(fixed)))
 
     def tick(self, now: float) -> Telemetry:
         with self._control_lock:

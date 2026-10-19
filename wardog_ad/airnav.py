@@ -18,6 +18,98 @@ from .geometry import angle_delta, distance
 
 
 DRAG = 8.2e-4    # 1/m: g*tan(30 deg) holds ~300 km/h (player cruise figure)
+SLIDE = 0.02     # 1/s: the slide measured with fit-slip (13:16 flight)
+
+
+class MotionFilter:
+    """Position + velocity (metres, map x / y) under one model of how the motion follows
+    the nose: ``align`` 1/s (inf = at once, arcade).  Fed by the rotor thrust (pitch along
+    the nose, drag against the motion), the HUD speed (size only) and the minimap fixes.
+
+    A line fit through the raw fixes is far too noisy to hover on (5-13 m fix noise:
+    50-180 km/h 'measured' at a 5 km/h hover, sim); the HUD speed is exact to ~1 km/h but
+    has no sign and no direction; together with the thrust they give ~1-2 km/h."""
+
+    ACC_NOISE = 1.5      # m/s^2 not explained by the model
+    MEMORY = .97         # per fix: how fast the score forgets (~5 s at 7 fixes/s)
+
+    def __init__(self, align: float):
+        self.align = align
+        self.x = np.zeros(4)
+        self.P = np.diag([100.0, 100.0, 25.0, 25.0])
+        self.score = 0.0             # log-likelihood of the recent fixes under this model
+
+    def reset(self, pos_m, sigma_m):
+        self.x[:2] = pos_m
+        self.P[:2, :] = 0.0
+        self.P[:, :2] = 0.0
+        self.P[0, 0] = self.P[1, 1] = sigma_m ** 2
+
+    def predict(self, dt, nose, pitch, seed=None):
+        x = self.x
+        v = x[2:].copy()
+        if seed is not None and np.hypot(*v) < 1.0:
+            v = np.asarray(seed, dtype=float)
+        speed = float(np.hypot(*v))
+        acc = np.zeros(2)               # pitch unknown: assume it holds the speed
+        if pitch is not None:
+            acc = 9.81 * math.tan(math.radians(10 * pitch)) * nose - DRAG * speed * v
+        v_new = v + acc * dt
+        along = float(v_new @ nose)
+        if speed > .5 and (along > 0 or math.isinf(self.align)):
+            # the motion swings onto the nose axis (arcade: at once, also backwards)
+            size = float(np.hypot(*v_new))
+            axis = nose if along >= 0 else -nose
+            perp = np.array([-axis[1], axis[0]])
+            keep = 0.0 if math.isinf(self.align) else math.exp(-self.align * dt)
+            ang = math.atan2(float(v_new @ perp), abs(float(v_new @ axis))) * keep
+            v_new = size * (math.cos(ang) * axis + math.sin(ang) * perp)
+        x[:2] += v_new * dt             # like the dead reckoning: the new heading for the whole step
+        x[2:] = v_new
+        F = np.eye(4)
+        F[0, 2] = F[1, 3] = dt
+        G = np.array([[dt * dt / 2, 0], [0, dt * dt / 2], [dt, 0], [0, dt]])
+        self.P = F @ self.P @ F.T + self.ACC_NOISE ** 2 * G @ G.T
+
+    def update_speed(self, s_hud):
+        H = np.hstack([np.zeros((2, 2)), np.eye(2)])
+        size = float(np.hypot(*self.x[2:]))
+        if s_hud < .2:
+            # the HUD shows 0 km/h: hovering, the velocity is near zero in every direction
+            self.update(np.zeros(2), np.eye(2) * .3 ** 2, H)
+        elif size > max(.3, .5 * s_hud):
+            # the size of the motion only: h(v) = |v| (whole km/h on the HUD: +-0.14 m/s)
+            u = self.x[2:] / size
+            sigma = .25 + .02 * s_hud
+            self.update(np.array([s_hud]), np.array([[sigma ** 2]]), np.array([[0.0, 0.0, u[0], u[1]]]),
+                        h=np.array([size]))
+
+    def update_fix(self, z, sigma_fix, floor_m=None):
+        if floor_m is not None:
+            # after a gap: the filter's own spread knows nothing of a biased HUD speed or
+            # compass - at least the dead-reckoning drift since the last fix.  (On every fix
+            # it cut the link between position and velocity: the fixes moved the position
+            # and never corrected a velocity pointing the wrong way.)
+            for i in (0, 1):
+                self.P[i, i] = max(self.P[i, i], floor_m ** 2)
+        H = np.hstack([np.eye(2), np.zeros((2, 2))])
+        R = np.eye(2) * sigma_fix ** 2
+        y = z - self.x[:2]
+        S = H @ self.P @ H.T + R
+        d2 = float(y @ np.linalg.solve(S, y))
+        self.score = self.MEMORY * self.score - .5 * (min(d2, 50.0) + math.log(np.linalg.det(S)))
+        if d2 > 9.0:
+            # the fixes keep disagreeing: too sure of itself (a wrong direction at a crawl) -
+            # open it up and let them pull it back
+            self.P *= min(10.0, d2 / 9.0)
+        self.update(z, R, H)
+
+    def update(self, z, R, H, h=None):
+        y = z - (H @ self.x if h is None else h)
+        S = H @ self.P @ H.T + R
+        K = self.P @ H.T @ np.linalg.inv(S)
+        self.x = self.x + K @ y
+        self.P = (np.eye(4) - K @ H) @ self.P
 
 
 class AirNavigator:
@@ -56,6 +148,29 @@ class AirNavigator:
         self.heading_source = 'none' # 'compass' | 'track' | 'turn rate'
         self._odometry = np.zeros(2)
         self._motion: deque = deque()  # timestamped displacement, independent of fix corrections
+        # motion filters: one per model of the slide; the minimap fixes pick the one that
+        # predicts them best (the configured slide_align is 'inf' unless fit-slip was run, and
+        # trusting it in a sliding game threw a single filter hundreds of metres off)
+        self.filters = [MotionFilter(math.inf), MotionFilter(SLIDE)]
+        self.motion = self.filters[0]
+        self.align = self.align                 # sets the two models
+        self.last_fix_t = -1e9
+        self.fix_noise = self.fix_sigma   # m, learned from the scatter of the fixes
+        self._thrust_acc = 3.0
+
+    @property
+    def align(self) -> float:
+        return self._align
+
+    @align.setter
+    def align(self, value: float):
+        """1/s the travel direction swings onto the nose (inf: always along it).  The motion
+        filters run this model (first: it wins ties) and the other one - the slide the real
+        flights measured, or arcade - and the fixes pick whichever predicts them better."""
+        self._align = value
+        if getattr(self, 'filters', None):
+            self.filters[0].align = value
+            self.filters[1].align = SLIDE if math.isinf(value) else math.inf
 
     @property
     def initialized(self) -> bool:
@@ -68,6 +183,8 @@ class AirNavigator:
         self.anchor = None
         self._odometry = np.zeros(2)
         self._motion = deque([(now, self._odometry.copy())])
+        for f in self.filters:
+            f.reset(self.pos * self.mpp, sigma_m)
 
     def predict(self, now: float, speed_kmh: float | None, heading: float | None, pitch: float | None = None):
         """Advance on airspeed + compass (missing readings: keep the last ones briefly).
@@ -121,11 +238,12 @@ class AirNavigator:
         r = math.radians(self.heading + self.heading_bias)
         move = (np.array([math.sin(r), -math.cos(r)]) * self.speed_ms
                 + np.array([math.cos(r), math.sin(r)]) * self.side_ms) * self.speed_scale * dt / self.mpp
+        if self.anchor is not None:
+            self.anchor[1] += move          # instrument calibration: pure dead reckoning
+        move = self._predict_motion(dt, r, pitch, speed_kmh / 3.6 if speed_kmh is not None else None)
         self.pos = self.pos + move
         self._odometry += move
         self._remember_motion(now)
-        if self.anchor is not None:
-            self.anchor[1] += move
         self.travelled_m += abs(step_m)
         self.sigma_m += self.drift * abs(step_m) + 0.3 * dt
         self.source = 'dead reckoning'
@@ -159,6 +277,36 @@ class AirNavigator:
         else:
             u, w = self.speed_ms, 0.0
         self.speed_ms, self.side_ms, self._last_u = u, w, u
+
+    # ------------------------------------------------------------------ motion filter
+    def _predict_motion(self, dt, r, pitch, hud_ms):
+        """Advance the motion filters by ``dt`` and fold in the HUD speed.  Returns the
+        predicted displacement in map px (the fixes then correct it)."""
+        nose = np.array([math.sin(r), -math.cos(r)])
+        self._thrust_acc = abs(9.81 * math.tan(math.radians(10 * pitch))) if pitch is not None else 3.0
+        seed = None
+        if hud_ms is not None and hud_ms * self.speed_scale > 2.0 and self.t - self.last_fix_t > 1.5:
+            # dead reckoning only: start the motion from the instruments (with fixes coming
+            # in, they and the thrust find the direction - one bad speed reading must not)
+            seed = (nose * self.speed_ms + np.array([math.cos(r), math.sin(r)]) * self.side_ms) * self.speed_scale
+        old = self.motion.x[:2].copy()
+        for f in self.filters:
+            f.predict(dt, nose, pitch, seed)
+            if hud_ms is not None:
+                f.update_speed(hud_ms * self.speed_scale)
+        return (self.motion.x[:2] - old) / self.mpp
+
+    @property
+    def sliding(self) -> bool:
+        """The fixes say the motion slides on (thrust and drag physics), not arcade."""
+        return not math.isinf(self.motion.align)
+
+    def velocity(self, now: float, max_age: float = 1.5):
+        """Fused ground velocity (m/s, map x / y) while the minimap fixes keep it honest;
+        otherwise the dead-reckoned estimate (slide model) or None."""
+        if self.pos is not None and now - self.last_fix_t <= max_age:
+            return self.motion.x[2:].copy()
+        return self.velocity_estimate()
 
     def _remember_motion(self, now):
         self._motion.append((now, self._odometry.copy()))
@@ -208,8 +356,27 @@ class AirNavigator:
         self._calibrate(z)
         self._course(raw_z, fix.timestamp)
         k = self.sigma_m ** 2 / (self.sigma_m ** 2 + self.fix_sigma ** 2)
-        self.pos = self.pos + k * (z - self.pos)
+        fit = self._fix_fit(fix.timestamp, 1.0)
+        if fit is not None:
+            # how noisy the fixes really are: their scatter about a 1 s line (15 m assumed
+            # until then; with ~5 m fixes that let a 19 m error stand for seconds)
+            self.fix_noise += .05 * (float(np.clip(fit[2], 2.0, self.fix_sigma)) - self.fix_noise)
+        gap = fix.timestamp - self.last_fix_t > 2.0
+        track = self._fix_fit(fix.timestamp, 2.0)
+        for f in self.filters:
+            f.update_fix(z * self.mpp, 1.3 * self.fix_noise, self.sigma_m if gap else None)
+            if track is not None:
+                # the track's own velocity: an average over the last 2 s, ~1 s old - allow for
+                # what the thrust changed meanwhile
+                v, se, _ = track
+                R = np.eye(2) * (2 * se * se + .5 ** 2 + self._thrust_acc ** 2)
+                f.update(v, R, np.hstack([np.zeros((2, 2)), np.eye(2)]))
+        best = max(self.filters, key=lambda f: f.score)
+        if best is not self.motion and best.score > self.motion.score + 2.0:
+            self.motion = best                    # clearly the better model of the motion
+        self.pos = self.motion.x[:2] / self.mpp
         self.sigma_m = math.sqrt(1 - k) * self.sigma_m
+        self.last_fix_t = max(self.last_fix_t, fix.timestamp)
         self.source = 'fix'
         self.fixes_used += 1
         return True
@@ -218,12 +385,25 @@ class AirNavigator:
         """Velocity over ground (m/s, map x/y) from the recent minimap fixes; None if too few
         or stale.  The game has no wind, so this is the airspeed too - and unlike the HUD
         digits it cannot lose a '1' (real flight 10:56: 167 km/h read as 68, 102 as 2)."""
+        fit = self._fix_fit(now, window)
+        return None if fit is None else fit[0]
+
+    def _fix_fit(self, now, window):
+        """Line fit through the recent fixes -> (velocity m/s, its standard error m/s, fix
+        scatter about the line m) or None."""
         pts = [(t, z) for t, z in self.track if now - t <= window]
         if len(pts) < 3 or pts[-1][0] - pts[0][0] < .5 or now - pts[-1][0] > 1.0:
             return None
         ts = np.array([p[0] for p in pts]) - now
         zs = np.array([p[1] for p in pts])
-        return np.array([np.polyfit(ts, zs[:, 0], 1)[0], np.polyfit(ts, zs[:, 1], 1)[0]]) * self.mpp
+        A = np.vstack([ts, np.ones_like(ts)]).T
+        coef, *_ = np.linalg.lstsq(A, zs, rcond=None)
+        v = coef[0] * self.mpp
+        resid = (zs - A @ coef) * self.mpp
+        dof = max(1, len(pts) - 2)
+        spread = float(np.sum((ts - ts.mean()) ** 2))
+        scatter = math.sqrt(float(np.sum(resid ** 2)) / (2 * dof))
+        return v, scatter / math.sqrt(max(spread, 1e-6)), scatter
 
     def velocity_estimate(self):
         """Dead-reckoned velocity (m/s, map x / y) from the slide model, or None."""
@@ -237,15 +417,23 @@ class AirNavigator:
         v = self.ground_velocity(now, window)
         return None if v is None else float(np.hypot(*v) * 3.6)
 
+    def ground_speed_fit(self, now: float, window: float = 2.0):
+        """Ground speed from the fixes and its standard error (both km/h), or None."""
+        fit = self._fix_fit(now, window)
+        return None if fit is None else (float(np.hypot(*fit[0]) * 3.6), fit[1] * 3.6)
+
     def _direction_from_fixes(self, now):
         """Forwards or backwards from the fix velocity along the nose (the HUD speed has no
         sign; guessing from the pitch flipped to 'backwards' while braking and ran away)."""
-        v = self.ground_velocity(now)
-        if v is None or self.heading is None:
+        fit = self._fix_fit(now, 1.5)
+        if fit is None or self.heading is None:
             return
+        v, se, _ = fit
         r = math.radians(self.heading + self.heading_bias)
         along = float(v[0] * math.sin(r) - v[1] * math.cos(r))
-        if abs(along) > 0.7:
+        # only a clear reading: noisy fixes (10 m) put +-5 m/s on a 1.5 s fit, and a wrong
+        # 'backwards' at a crawl flies the dead reckoning the wrong way
+        if abs(along) > max(0.7, 3 * se):
             self.direction, self._track_dir_t = (1.0 if along > 0 else -1.0), now
 
     def _course(self, z, t):

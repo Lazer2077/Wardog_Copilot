@@ -125,7 +125,10 @@ class AircraftTuning:
     decel_ms2: float = 3.0              # planned braking (players dump 270 -> 50 km/h nose-up)
     # landing at the destination / return point
     auto_land: bool = True              # False: hover at the destination and hand over
-    hover_radius_m: float = 40.0        # descend only this close to the point ...
+    hover_radius_m: float = 40.0        # descend only this close to the point (no measured velocity) ...
+    land_precision_m: float = 8.0       # ... with the fused velocity: descend only this close, and keep centring
+    centre_gain: float = 0.25           # 1/s: centring speed per metre off the touchdown point ...
+    centre_decel_ms2: float = 0.6       # ... and never faster than can stop on it at this braking
     land_zone_m: float = 150.0          # ... but stop and hover from this far (fixes are ~5 m/px)
     overshoot_m: float = 40.0           # final leg: this much farther than the closest pass -> hover
     land_anyway_s: float = 25.0         # cannot centre within this time -> land where we are
@@ -143,6 +146,8 @@ class AircraftTuning:
     vector_turnround: bool = True       # turning round at speed (F7 while flying away) with it too
     vg_pivot_kmh: float = 45.0          # turning round: start the 180 deg pivot below this speed
     vg_gain: float = 0.5                # 1/s: velocity error -> acceleration
+    vg_gain_crawl: float = 1.0          # ... while centring at a crawl (the position loop needs a faster speed loop)
+    vg_crawl_kmh: float = 20.0          # below this (and wanting no more): crawl - the nose may point either way
     vg_decel_ms2: float = 3.5           # braking curve onto the landing point
     vg_dead_ms2: float = 0.3            # smaller accelerations: hold the nose where it is
     vg_yaw_kp: float = 0.03             # yaw keys per degree: the nose must keep up with the thrust direction
@@ -154,7 +159,8 @@ class AircraftTuning:
     hook_lag_s: float = 1.0             # plan the stop this many seconds of flight early (response lag)
     hook_kmh_per_tick: float = 20.0     # nose-up braking allowed in the hook: 1 tick per 20 km/h
     hook_kv: float = 0.05               # ticks nose-up per km/h above the hook's braking curve
-    land_here_radius_m: float = 150.0   # F10: touch down within this of where the key was pressed
+    land_here_radius_m: float = 150.0   # F10: touch down within this of where the key was pressed (clearings,
+                                        # flat ground; with a measured velocity on the point itself otherwise)
     land_hover_agl_m: float = 15.0      # over the landing area: hover this low before the final descent
     land_fast_vz: float = 10.0          # sink rate allowed while still above 40 m over the landing area
     # open ground (base map): forest, water and town are avoided for the touchdown

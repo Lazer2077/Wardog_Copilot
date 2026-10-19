@@ -321,8 +321,10 @@ class HeliPilot:
         self.velocity = None             # callable(now) -> measured ground velocity m/s (map x, y)
         self._vel_now = None
         self._vg_on = False
+        self._precise = False
         self._turning = False
         self.compass_fresh = None        # callable(now) -> compass read recently (set by the autopilot)
+        self.sliding = None              # callable() -> the fixes show sliding physics, not arcade
         self.takeoff_ground = None       # ground height (m ASL) where we lifted off
         self.set_waypoints(waypoints)
 
@@ -346,8 +348,9 @@ class HeliPilot:
 
     def land_now(self, point=None):
         """Stop, hover and land where we are.  With ``point`` (the position when the key was
-        pressed) it comes back to within ``land_here_radius_m`` of it after braking;
-        without a position it lands wherever it stops (HUD only)."""
+        pressed) it comes back after braking: onto the point itself with a measured velocity,
+        otherwise within ``land_here_radius_m`` of it (forest, water or a slope there: the
+        nearest clearing within that radius); without a position it lands wherever it stops."""
         self.land_here = True
         self.land_point = tuple(point) if point is not None else None
         if self.land_point is not None:
@@ -549,7 +552,8 @@ class HeliPilot:
         want = to * v_want
         drag = 9.81 * math.tan(math.radians(10 * t.ref_pitch_ticks)) / (t.ref_speed_kmh / 3.6) ** 2
         speed = float(np.linalg.norm(vel))
-        acc = t.vg_gain * (want - vel) + drag * speed * vel
+        gain = t.vg_gain_crawl if speed < t.vg_crawl_kmh / 3.6 and v_want < t.vg_crawl_kmh / 3.6 else t.vg_gain
+        acc = gain * (want - vel) + drag * speed * vel
         a = float(np.linalg.norm(acc))
         v_stop = speed * speed / (2 * t.vg_decel_ms2)
         info = dict(v_want=round(v_want * 3.6), acc=round(a, 2),
@@ -564,7 +568,9 @@ class HeliPilot:
         # braking: whichever needs less turning (nose up, or nose down if we slide backwards);
         # speeding up towards where we want to go: the nose faces the thrust (turn round,
         # never fly backwards - it did, at 40 km/h, the whole way in the first try)
-        forward = abs(e_fwd) <= abs(e_back) if braking or v_want < 3 else True
+        # centring at a crawl: nose-down or nose-up, whichever is nearer (half the yawing)
+        crawl = speed < t.vg_crawl_kmh / 3.6 and v_want < t.vg_crawl_kmh / 3.6
+        forward = abs(e_fwd) <= abs(e_back) if braking or v_want < 3 or crawl else True
         reversing = v_want > 12 and abs(angle_delta(math.degrees(math.atan2(vel[0], -vel[1])) % 360,
                                                     nav['bearing'])) > 120
         if braking and reversing and speed < t.vg_pivot_kmh / 3.6:
@@ -574,8 +580,11 @@ class HeliPilot:
         info['reversing'] = reversing
         err = e_fwd if forward else e_back
         # thrust only once the nose is (nearly) where it should be: full thrust 38 deg off the
-        # wanted direction is exactly the centripetal force of an orbit round the point
-        along = max(0.0, math.cos(math.radians(err))) ** 4
+        # wanted direction is exactly the centripetal force of an orbit round the point.  At a
+        # crawl there is no orbit to fear, and waiting for the nose left the last metres
+        # unbraked (sim: drifted 20 m past at 7 km/h with the nose 40-60 deg off)
+        taper = 1.0 + 3.0 * min(1.0, max(0.0, (speed - 3.0) / 7.0))
+        along = max(0.0, math.cos(math.radians(err))) ** taper
         tilt = math.degrees(math.atan(a * along / 9.81)) / 10
         info.update(nose_for='accel' if forward else 'brake', acc_heading=round(h_acc))
         return (tilt if forward else -tilt), err, info
@@ -688,8 +697,13 @@ class HeliPilot:
             else:
                 in_zone = True
         compass_ok = self.compass_fresh(now) if callable(self.compass_fresh) else True
-        self._vg_on = (self._vel_now is not None and compass_ok
+        # thrust pointing is for the sliding physics; where the motion follows the nose at once
+        # (arcade) it swings round the point (sim: 120 m off) and the nose-pointing steering lands
+        slides = self.sliding() if callable(self.sliding) else True
+        self._vg_on = (self._vel_now is not None and compass_ok and slides
                        and (t.vector_guidance or (t.vector_landing and in_zone)))
+        # a measured velocity: the touchdown point itself can be held, not just the area
+        self._precise = self._vel_now is not None and compass_ok
         info = dict(heading_error=error, agl=agl, speed_kmh=spd, vz=self.vz, vz_pred=vz_pred,
                     terrain_rate=self.terrain_rate, pitch=hud.pitch, lever=hud.collective)
         if nav:
@@ -801,7 +815,11 @@ class HeliPilot:
                 self.hover_since = None
         elif self.landing is None and self.airborne and nav and nav['last'] and dist < t.hover_radius_m:
             self._enter('hover', now)     # auto_land off: hover over the point and hand over
-        far = 1.5 * t.land_here_radius_m if self.land_here else 2.5 * t.hover_radius_m
+        if self._precise:
+            # measured velocity: hold the touchdown point, not just the area around it
+            far = max(3 * t.land_precision_m, 25.0)
+        else:
+            far = 1.5 * t.land_here_radius_m if self.land_here else 2.5 * t.hover_radius_m
         if self.landing in ('descend', 'flare') and dist is not None and dist > far \
                 and agl > 15 and not self._land_anyway(now):
             self._enter('hover', now)     # drifted off: go round and settle again
@@ -815,7 +833,14 @@ class HeliPilot:
                                                 else self.land_point) * self.mpp
             if self.hover_since is None or (dist is not None and dist > t.land_zone_m):
                 self.hover_since = now        # the land-anyway clock runs inside the zone only
-            radius = t.land_here_radius_m if self.land_here and not self.spot_moved else t.hover_radius_m
+            if self._precise:
+                # with the fused velocity it can stop on the point: descend only over it (the
+                # 40 m hover radius put the skids down 10-40 m off, F10 anywhere within 150 m)
+                radius = t.land_precision_m
+                if self.hover_since is not None and now - self.hover_since > .5 * t.land_anyway_s:
+                    radius = t.hover_radius_m          # taking long: the old, looser radius
+            else:
+                radius = t.land_here_radius_m if self.land_here and not self.spot_moved else t.hover_radius_m
             centred = dist is None or dist < radius or self._land_anyway(now)
             steady = abs(spd) < t.descend_max_kmh and abs(vz_pred) < 3.0
             if not steady or self.phase_since is None:
@@ -844,15 +869,22 @@ class HeliPilot:
             # and we must be (almost) stopped before the skids go down
             uneven = abs(self.terrain_rate) > t.ground_steady_ms and agl < 25
             moving = abs(spd) > t.touchdown_max_kmh and agl < 2 * t.flare_agl_m
-            if uneven or moving:
+            # drifted off the touchdown point on the way down: stop sinking while it centres
+            # again (it set down 10-15 m off, still sliding, in the noisy-fix simulation)
+            off = (self._precise and dist is not None and dist > 1.5 * t.land_precision_m
+                   and agl > .5 and not self._land_anyway(now))
+            if uneven or moving or off:
                 self.hold_since = getattr(self, 'hold_since', None) or now
             else:
                 self.hold_since = None
-            if (uneven or moving) and now - self.hold_since > (8.0 if uneven else 20.0):
-                uneven = moving = False       # holding does not settle it: go down anyway, slowly
-            if uneven or moving:
+            if (uneven or moving or off) and now - self.hold_since > (8.0 if uneven else 20.0):
+                uneven = moving = off = False   # holding does not settle it: go down anyway, slowly
+            if uneven or moving or off:
                 vz_target = max(vz_target, 0.0 if agl > 3 else .5)
-                mode += ' (hold: ' + ('uneven ground' if uneven else 'still moving') + ')'
+                if off and agl < t.flare_agl_m:
+                    vz_target = max(vz_target, 1.0)     # skids near the ground: up a little to centre freely
+                why = 'uneven ground' if uneven else 'still moving' if moving else 'off the spot'
+                mode += ' (hold: ' + why + ')'
                 self.touch_since = None
             # the HUD shows whole metres: 0 = on the skids.  Only then lower the collective.
             if agl <= 0.5 and not moving:
@@ -917,11 +949,20 @@ class HeliPilot:
         if move_to_target and nav is not None:
             # creep towards the landing point when facing it (pitch makes the helicopter move)
             cap = t.creep_kmh if dist < t.hover_radius_m or self.landing != 'hover' else t.reposition_kmh
-            vectored = self._vg_on
-            v_target = min(cap, .5 * max(0.0, dist - (2 if vectored else 5))) if abs(error) < 30 or vectored else 0.0
-            near = self.land_here and not self.spot_moved and dist < .7 * t.land_here_radius_m
-            if near or (self.landing in ('descend', 'flare') and agl < 10):
-                v_target = 0.0          # close enough / nearly down: just stop, do not creep on
+            if self._precise:
+                # position -> speed: a gentle braking curve onto the point (the old 0.5 km/h per
+                # metre asked 5 km/h at 12 m, inside the guidance dead band: it stopped 12 m off)
+                d = max(0.0, dist - 1.0)
+                v_target = min(cap, 3.6 * min(t.centre_gain * d, math.sqrt(2 * t.centre_decel_ms2 * d)))
+                if not self._vg_on and abs(error) >= 30:
+                    v_target = 0.0          # nose-pointing steering: turn to face the point first
+                if self.landing in ('descend', 'flare') and agl < 2 * t.flare_agl_m:
+                    v_target = min(v_target, .7 * t.touchdown_max_kmh)   # keep centring, slow enough to set down
+            else:
+                v_target = min(cap, .5 * max(0.0, dist - 5)) if abs(error) < 30 else 0.0
+                near = self.land_here and not self.spot_moved and dist < .7 * t.land_here_radius_m
+                if near or (self.landing in ('descend', 'flare') and agl < 10):
+                    v_target = 0.0          # close enough / nearly down: just stop, do not creep on
         sinking_low = self.airborne and self.landing is None and agl < t.min_agl_m and vz_pred < -1.0
         # ground closing in: dAGL/dt = own climb - ground rise.  This catches rising ground
         # even while we ARE climbing (the crash at 22:32 climbed +5..8 m/s into a ridge).
@@ -994,7 +1035,8 @@ class HeliPilot:
             pitch_target = max(-back, min(fwd, self._hook_pitch))
         vector = None
         if (self._vg_on and nav is not None and self.airborne
-                and (moving_low or agl >= min(t.turn_agl_m, 8.0 if self.landing else t.turn_agl_m))):
+                and (moving_low or self.landing in ('hover', 'descend', 'flare')
+                     or agl >= min(t.turn_agl_m, 8.0 if self.landing else t.turn_agl_m))):
             last_leg = nav['last'] and (t.auto_land or self.land_here)
             stop_m = None
             if last_leg:
@@ -1011,6 +1053,8 @@ class HeliPilot:
             down = t.pitch_fwd_max * (.3 + .7 * margin)
             if self.landing in ('descend', 'flare') or agl < 8:
                 up, down = min(up, 1.0), min(down, .4)
+            if self.landing == 'flare' and agl < 3:
+                up, down = min(up, .5), min(down, .3)     # skids close: small corrections only
             if sinking_low_alt:
                 down = min(down, .4)
             if pull_up:
@@ -1038,7 +1082,9 @@ class HeliPilot:
         # ------------------------------------------------ heading
         near = 20.0 if self.landing in ('descend', 'flare') else 8.0     # going down: hold the heading
         if self._vg_on:
-            near = 5.0                    # the thrust can be pointed anywhere: keep centring
+            near = 1.5                    # the thrust can be pointed anywhere: keep centring
+        elif self._precise:
+            near = 3.0                    # measured velocity: keep facing the point while centring
         if not yaw_ok or nav is None or (move_to_target and dist is not None and dist < near):
             yaw = 0.0
             if self.landing is None and mode in ('takeoff', 'cruise', 'approach', 'terrain'):
