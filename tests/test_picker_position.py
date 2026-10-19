@@ -118,16 +118,71 @@ def test_map_dropdown_dispatches_manual_and_auto_and_reports_failure(picker):
     choice, map_id = next(iter(window._map_choices.items()))
     window.map_choice.set(choice)
     window._change_map()
+    window._map_change_thread.join(2)
+    window._finish_map_change()
     window.map_choice.set('自动识别')
     window._change_map()
+    window._map_change_thread.join(2)
+    window._finish_map_change()
     assert calls == [map_id, None]
     def fail(map_id):
         raise ValueError('missing map')
     pilot.set_map_mode = fail
     window.map_choice.set(choice)
     window._change_map()
+    window._map_change_thread.join(2)
+    window._finish_map_change()
     assert '切图失败' in window.map_error.cget('text')
     assert window.map_choice.get() == '自动识别'
+
+
+def test_map_loading_keeps_ui_responsive_and_worker_never_touches_tk(picker):
+    import threading
+    window,pilot,_=picker
+    entered,release=threading.Event(),threading.Event()
+    def load(_):
+        entered.set()
+        assert release.wait(3)
+    pilot.set_map_mode=load
+    choice,_=next(iter(window._map_choices.items()))
+    window.map_choice.set(choice)
+    try:
+        window._change_map()
+        assert entered.wait(1)
+        assert window._map_changing and str(window.map_combo.cget('state'))=='disabled'
+        heartbeat=[]
+        window.win.after(0,lambda:heartbeat.append(True))
+        window.win.update()
+        assert heartbeat==[True]
+        window._change_map()  # a second request cannot race the active load
+        window._finish_map_change()
+        assert window._map_changing
+        window.win.withdraw()
+    finally:
+        release.set()
+        window._map_change_thread.join(3)
+    window._finish_map_change()
+    assert not window._map_changing and str(window.map_combo.cget('state'))=='readonly'
+
+
+def test_map_window_can_close_while_background_load_finishes(picker):
+    import threading
+    window,pilot,_=picker
+    entered,release=threading.Event(),threading.Event()
+    def load(_):
+        entered.set()
+        assert release.wait(3)
+    pilot.set_map_mode=load
+    window.map_choice.set(next(iter(window._map_choices)))
+    try:
+        window._change_map()
+        assert entered.wait(1)
+        window.close()
+    finally:
+        release.set()
+        window._map_change_thread.join(3)
+    assert not window.alive and not window._map_change_thread.is_alive()
+    assert window._map_change_result.get_nowait() is None
 
 
 def test_base_selection_and_manual_position_label(picker):

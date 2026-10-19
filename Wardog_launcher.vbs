@@ -23,7 +23,7 @@ stamp = Year(Now) & Pad(Month(Now)) & Pad(Day(Now)) & "_" & Pad(Hour(Now)) & Pad
 logPath = files.BuildPath(logDir, "launcher_" & mode & "_" & stamp & ".log")
 shell.Environment("PROCESS")("PYTHONUTF8") = "1"
 command = Quote(shell.ExpandEnvironmentStrings("%ComSpec%")) & " /d /s /c " & _
-          Quote("python -m wardog_ad " & args & " >> " & Quote(logPath) & " 2>&1")
+          Quote("python -X faulthandler -m wardog_ad " & args & " >> " & Quote(logPath) & " 2>&1")
 On Error Resume Next
 code = shell.Run(command, 0, True)
 failure = Err.Description

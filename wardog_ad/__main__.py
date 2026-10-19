@@ -458,6 +458,9 @@ def cmd_dataset_check(args):
 
 
 def main(argv=None):
+    # Configure OpenCV before any capture, localization or UI workers start.
+    import cv2
+    cv2.setNumThreads(2)
     parser = argparse.ArgumentParser(prog='wardog_ad', description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--config', default=str(DEFAULT_PATH))

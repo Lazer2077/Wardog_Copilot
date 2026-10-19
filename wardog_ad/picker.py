@@ -6,6 +6,8 @@ Mouse: wheel = zoom, left-drag = pan, left-click = destination, right-click = re
 from __future__ import annotations
 
 import math
+import queue
+import threading
 import time
 from dataclasses import dataclass
 import tkinter as tk
@@ -39,6 +41,8 @@ class MapPicker:
         self._auto_center_pending = True
         self._position_action = None
         self._team_bases = []
+        self._map_changing = False
+        self._map_change_result = queue.SimpleQueue()
         rgb = cv2.cvtColor(self.assets.load_image(), cv2.COLOR_BGR2RGB)
         self.image = Image.fromarray(rgb)
         self.win = tk.Frame(master) if embedded else tk.Toplevel(master)
@@ -331,7 +335,9 @@ class MapPicker:
     def _tick(self):
         if not self.alive:
             return
-        self.map_choice.set('自动识别' if self.pilot.cfg.auto_map.enabled else self.pilot.assets.map_id.upper())
+        self._finish_map_change()
+        if not self._map_changing:
+            self.map_choice.set('自动识别' if self.pilot.cfg.auto_map.enabled else self.pilot.assets.map_id.upper())
         if self.assets.map_id != self.pilot.assets.map_id:
             self.assets = self.pilot.assets
             self.image = Image.fromarray(cv2.cvtColor(self.assets.load_image(), cv2.COLOR_BGR2RGB))
@@ -532,16 +538,40 @@ class MapPicker:
         self.base_hint.config(text='基地位置已保存；不会更改当前车辆位置。')
 
     def _change_map(self, event=None):
+        if self._map_changing:
+            return
         choice = self.map_choice.get()
         map_id = None if choice == '自动识别' else self._map_choices.get(choice)
         if choice != '自动识别' and map_id is None:
             return
+        self._map_changing = True
+        self.map_combo.configure(state='disabled')
+        self.map_error.config(text='正在加载地图，驾驶将暂停…')
+
+        def load():
+            # Never touch Tk from the worker. Errors and completion are consumed
+            # by the regular UI timer, even if this window closes during loading.
+            try:
+                self.pilot.set_map_mode(map_id)
+                error = None
+            except Exception as exc:
+                error = str(exc)
+            self._map_change_result.put(error)
+
+        self._map_change_thread = threading.Thread(target=load,name='manual-map-load',daemon=True)
+        self._map_change_thread.start()
+
+    def _finish_map_change(self):
+        if not self._map_changing:
+            return
         try:
-            self.pilot.set_map_mode(map_id)
-            self.map_error.config(text='')
-        except Exception as error:
-            self.map_error.config(text=f'切图失败：{error}')
-            self.map_choice.set('自动识别' if self.pilot.cfg.auto_map.enabled else self.pilot.assets.map_id.upper())
+            error = self._map_change_result.get_nowait()
+        except queue.Empty:
+            return
+        self._map_changing = False
+        self.map_combo.configure(state='readonly')
+        self.map_error.config(text=f'切图失败：{error}' if error is not None else '')
+        self.map_choice.set('自动识别' if self.pilot.cfg.auto_map.enabled else self.pilot.assets.map_id.upper())
 
     def _set_destination(self, point):
         with self.pilot.lock:
@@ -616,6 +646,8 @@ class MapPicker:
         self.pilot.set_cruise_speed(max(60.0, min(350.0, value)))
 
     def close(self):
+        if not self.alive:
+            return
         self.alive = False
         timer = getattr(self,'_tick_timer',None)
         if timer:

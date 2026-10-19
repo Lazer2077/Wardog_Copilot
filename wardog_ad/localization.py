@@ -92,8 +92,9 @@ def player_heading(image: np.ndarray, anchor=(0.5, 0.5)) -> float | None:
 
 
 class MinimapLocalizer:
-    def __init__(self, points: np.ndarray, descriptors: np.ndarray, map_shape, *, threads: int = 2):
-        cv2.setNumThreads(threads)
+    def __init__(self, points: np.ndarray, descriptors: np.ndarray, map_shape):
+        # setNumThreads is process-global and explicitly NOT thread-safe.
+        # Configure it at startup, never while constructing/swapping live maps.
         self.points = np.float32(points)
         self.descriptors = np.float32(descriptors)
         self.map_shape = map_shape  # (h, w)
