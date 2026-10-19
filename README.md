@@ -101,7 +101,7 @@ Helicopter HUD/compass regions and audio examples also need configuration. See t
 
 ```powershell
 python -m wardog_ad drive --profile aircraft --panel
-# Or use Wardog_autopilot.cmd; navigation does not depart immediately.
+# Or double-click Wardog_launcher.vbs (no terminal); navigation does not depart immediately.
 python tools/ui_preview.py --mode control --seconds 30
 ```
 

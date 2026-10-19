@@ -102,7 +102,7 @@ python -m wardog_ad --help
 
 ```powershell
 python -m wardog_ad drive --profile aircraft --panel
-# 或双击 Wardog_autopilot.cmd；默认不直接出发
+# 或双击 Wardog_launcher.vbs（无终端窗口）；默认不直接出发
 python tools/ui_preview.py --mode control --seconds 30
 ```
 

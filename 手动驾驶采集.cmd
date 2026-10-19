@@ -1,4 +1,4 @@
 @echo off
 cd /d "%~dp0"
-python -m wardog_ad collect --vehicle unknown --camera-view unknown
-pause
+start "" wscript.exe "%~dp0Wardog_launcher.vbs" collect
+exit /b

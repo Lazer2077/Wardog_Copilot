@@ -1,5 +1,15 @@
 # Initial setup / 初始配置
 
+For normal GUI use, double-click `Wardog_launcher.vbs` to start without a terminal.
+The existing three `.cmd` launchers also delegate to the hidden launcher and no
+longer pause after exit. Output is saved to `logs/launcher_*.log`; startup failures
+show the log location. For console debugging use `python -m wardog_ad start`.
+
+日常使用可直接双击 `Wardog_launcher.vbs`，全程不显示终端窗口。三个原有 `.cmd`
+入口也会转为隐藏启动，关闭软件后不再留下等待按键的终端。
+输出保存在 `logs/launcher_*.log`，异常退出会提示日志位置；需要终端调试时运行
+`python -m wardog_ad start`。
+
 The example contains no usable screen calibration: zero-sized rectangles disable
 those inputs. New interactive calibrations save a `reference` monitor rectangle
 (`[left, top, width, height]`). Captures scale automatically for resolution changes

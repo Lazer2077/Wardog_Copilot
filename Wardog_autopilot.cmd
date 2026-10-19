@@ -1,5 +1,5 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-python -m wardog_ad start
-pause
+start "" wscript.exe "%~dp0Wardog_launcher.vbs" start
+exit /b

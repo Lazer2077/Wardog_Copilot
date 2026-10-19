@@ -19,7 +19,7 @@ def main():
         path = Path(name)
         blob = subprocess.check_output(['git','show',':'+name],cwd=root)
         total += len(blob)
-        if path.parts[0] in forbidden_roots or path.suffix.lower() not in ('.py','.md','.json','.txt','.cmd',''):
+        if path.parts[0] in forbidden_roots or path.suffix.lower() not in ('.py','.md','.json','.txt','.cmd','.vbs',''):
             if name != '.gitignore':
                 errors.append((name,'unexpected artifact or file type'))
         if name in ('config.json','config.backup.json','lock_audio.json'):
